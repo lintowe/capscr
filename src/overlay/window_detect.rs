@@ -26,20 +26,32 @@ use windows::{
     },
 };
 
+#[cfg(windows)]
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+#[cfg(windows)]
 use std::sync::Mutex;
 
+#[cfg(windows)]
 static SELECTING: AtomicBool = AtomicBool::new(false);
+#[cfg(windows)]
 static HOVERED_HWND: AtomicU32 = AtomicU32::new(0);
+#[cfg(windows)]
 static SELECTED_HWND: AtomicU32 = AtomicU32::new(0);
+#[cfg(windows)]
 static CANCELLED: AtomicBool = AtomicBool::new(false);
+#[cfg(windows)]
 static OVERLAY_HWND: Mutex<Option<isize>> = Mutex::new(None);
+#[cfg(windows)]
 static WINDOW_LIST: Mutex<Vec<CachedWindow>> = Mutex::new(Vec::new());
 
+#[cfg(windows)]
 #[derive(Debug, Clone)]
 struct CachedWindow {
     hwnd: isize,
-    rect: RECT,
+    left: i32,
+    top: i32,
+    right: i32,
+    bottom: i32,
 }
 
 #[derive(Debug, Clone)]
@@ -172,8 +184,8 @@ impl WindowDetector {
                 continue;
             }
 
-            if pt.x >= win.rect.left && pt.x < win.rect.right &&
-               pt.y >= win.rect.top && pt.y < win.rect.bottom {
+            if pt.x >= win.left && pt.x < win.right &&
+               pt.y >= win.top && pt.y < win.bottom {
                 return Some(win.clone());
             }
         }
@@ -189,8 +201,8 @@ impl WindowDetector {
             let cached = Self::find_window_at_point(pt)?;
             let target_hwnd = HWND(cached.hwnd as *mut _);
 
-            let width = (cached.rect.right - cached.rect.left) as u32;
-            let height = (cached.rect.bottom - cached.rect.top) as u32;
+            let width = (cached.right - cached.left) as u32;
+            let height = (cached.bottom - cached.top) as u32;
 
             let title_len = GetWindowTextLengthW(target_hwnd);
             let title = if title_len > 0 {
@@ -204,7 +216,7 @@ impl WindowDetector {
             Some(DetectedWindow {
                 hwnd: target_hwnd.0 as u32,
                 title,
-                rect: (cached.rect.left, cached.rect.top, width, height),
+                rect: (cached.left, cached.top, width, height),
             })
         }
     }
@@ -258,7 +270,10 @@ unsafe extern "system" fn enum_windows_callback(hwnd: HWND, lparam: LPARAM) -> B
 
     windows.push(CachedWindow {
         hwnd: target.0 as isize,
-        rect,
+        left: rect.left,
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom,
     });
 
     BOOL(1)
@@ -312,10 +327,10 @@ unsafe extern "system" fn window_detect_wnd_proc(
 
                     let _ = GdiRectangle(
                         hdc,
-                        cached.rect.left - offset_x,
-                        cached.rect.top - offset_y,
-                        cached.rect.right - offset_x,
-                        cached.rect.bottom - offset_y,
+                        cached.left - offset_x,
+                        cached.top - offset_y,
+                        cached.right - offset_x,
+                        cached.bottom - offset_y,
                     );
 
                     SelectObject(hdc, old_pen);

@@ -25,22 +25,38 @@ use windows::{
 };
 
 use crate::capture::Rectangle;
+
+#[cfg(windows)]
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+#[cfg(windows)]
 use std::sync::Mutex;
 
+#[cfg(windows)]
 static SELECTING: AtomicBool = AtomicBool::new(false);
+#[cfg(windows)]
 static START_X: AtomicI32 = AtomicI32::new(0);
+#[cfg(windows)]
 static START_Y: AtomicI32 = AtomicI32::new(0);
+#[cfg(windows)]
 static END_X: AtomicI32 = AtomicI32::new(0);
+#[cfg(windows)]
 static END_Y: AtomicI32 = AtomicI32::new(0);
+#[cfg(windows)]
 static DRAGGING: AtomicBool = AtomicBool::new(false);
+#[cfg(windows)]
 static CANCELLED: AtomicBool = AtomicBool::new(false);
 
+#[cfg(windows)]
 static SCREEN_BITMAP: Mutex<Option<isize>> = Mutex::new(None);
+#[cfg(windows)]
 static SCREEN_DC: Mutex<Option<isize>> = Mutex::new(None);
+#[cfg(windows)]
 static SCREEN_WIDTH: AtomicI32 = AtomicI32::new(0);
+#[cfg(windows)]
 static SCREEN_HEIGHT: AtomicI32 = AtomicI32::new(0);
+#[cfg(windows)]
 static VIRTUAL_X: AtomicI32 = AtomicI32::new(0);
+#[cfg(windows)]
 static VIRTUAL_Y: AtomicI32 = AtomicI32::new(0);
 
 pub struct RegionSelector;
