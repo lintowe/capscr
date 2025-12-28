@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 #[cfg(windows)]
 use windows::{
     core::PCWSTR,

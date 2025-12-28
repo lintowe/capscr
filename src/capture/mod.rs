@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 mod screen;
 mod window;
 mod region;
@@ -7,8 +9,6 @@ mod tonemapping;
 pub use screen::ScreenCapture;
 pub use window::WindowCapture;
 pub use region::RegionCapture;
-pub use hdr::{HdrCapture, HdrFormat};
-pub use tonemapping::ToneMapOperator;
 
 use anyhow::Result;
 use image::RgbaImage;
@@ -37,6 +37,7 @@ impl Rectangle {
         Self { x, y, width, height }
     }
 
+    #[cfg(any(test, windows))]
     pub fn normalize(start_x: i32, start_y: i32, end_x: i32, end_y: i32) -> Self {
         let x = start_x.min(end_x);
         let y = start_y.min(end_y);
@@ -57,6 +58,7 @@ pub struct MonitorInfo {
     pub is_primary: bool,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone)]
 pub struct WindowInfo {
     pub id: u32,
@@ -66,7 +68,6 @@ pub struct WindowInfo {
     pub y: i32,
     pub width: u32,
     pub height: u32,
-    pub is_visible: bool,
 }
 
 pub fn list_monitors() -> Result<Vec<MonitorInfo>> {
@@ -84,25 +85,6 @@ pub fn list_monitors() -> Result<Vec<MonitorInfo>> {
         })
         .collect();
     Ok(monitors)
-}
-
-pub fn list_windows() -> Result<Vec<WindowInfo>> {
-    let windows = xcap::Window::all()?;
-    let window_infos: Vec<WindowInfo> = windows
-        .into_iter()
-        .filter(|w| !w.title().is_empty() && w.width() > 0 && w.height() > 0)
-        .map(|w| WindowInfo {
-            id: w.id(),
-            title: w.title().to_string(),
-            app_name: w.app_name().to_string(),
-            x: w.x(),
-            y: w.y(),
-            width: w.width(),
-            height: w.height(),
-            is_visible: !w.is_minimized(),
-        })
-        .collect();
-    Ok(window_infos)
 }
 
 #[cfg(test)]
