@@ -1,0 +1,118 @@
+mod screen;
+mod window;
+mod region;
+mod hdr;
+mod tonemapping;
+
+pub use screen::ScreenCapture;
+pub use window::WindowCapture;
+pub use region::RegionCapture;
+pub use hdr::{HdrCapture, HdrDisplayInfo, HdrFormat};
+pub use tonemapping::{ToneMapOperator, ToneMapper};
+
+use anyhow::Result;
+use image::RgbaImage;
+
+pub trait Capture {
+    fn capture(&self) -> Result<RgbaImage>;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CaptureMode {
+    FullScreen,
+    Window,
+    Region,
+    HdrScreen,
+}
+
+impl CaptureMode {
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            CaptureMode::FullScreen => "Full Screen",
+            CaptureMode::Window => "Window",
+            CaptureMode::Region => "Region",
+            CaptureMode::HdrScreen => "HDR Screen",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Rectangle {
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+}
+
+impl Rectangle {
+    pub fn new(x: i32, y: i32, width: u32, height: u32) -> Self {
+        Self { x, y, width, height }
+    }
+
+    pub fn normalize(start_x: i32, start_y: i32, end_x: i32, end_y: i32) -> Self {
+        let x = start_x.min(end_x);
+        let y = start_y.min(end_y);
+        let width = (start_x - end_x).unsigned_abs();
+        let height = (start_y - end_y).unsigned_abs();
+        Self { x, y, width, height }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct MonitorInfo {
+    pub id: u32,
+    pub name: String,
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+    pub is_primary: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct WindowInfo {
+    pub id: u32,
+    pub title: String,
+    pub app_name: String,
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+    pub is_visible: bool,
+}
+
+pub fn list_monitors() -> Result<Vec<MonitorInfo>> {
+    let screens = xcap::Monitor::all()?;
+    let monitors: Vec<MonitorInfo> = screens
+        .into_iter()
+        .map(|s| MonitorInfo {
+            id: s.id(),
+            name: s.name().to_string(),
+            x: s.x(),
+            y: s.y(),
+            width: s.width(),
+            height: s.height(),
+            is_primary: s.is_primary(),
+        })
+        .collect();
+    Ok(monitors)
+}
+
+pub fn list_windows() -> Result<Vec<WindowInfo>> {
+    let windows = xcap::Window::all()?;
+    let window_infos: Vec<WindowInfo> = windows
+        .into_iter()
+        .filter(|w| !w.title().is_empty() && w.width() > 0 && w.height() > 0)
+        .map(|w| WindowInfo {
+            id: w.id(),
+            title: w.title().to_string(),
+            app_name: w.app_name().to_string(),
+            x: w.x(),
+            y: w.y(),
+            width: w.width(),
+            height: w.height(),
+            is_visible: !w.is_minimized(),
+        })
+        .collect();
+    Ok(window_infos)
+}
