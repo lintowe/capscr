@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use image::{Rgba, RgbaImage};
 
 const MAX_TONEMAP_DIMENSION: u32 = 16384;

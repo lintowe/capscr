@@ -1,7 +1,9 @@
 #[cfg(windows)]
 use windows::Win32::Media::Audio::{PlaySoundW, SND_ASYNC, SND_MEMORY};
 
+#[cfg(windows)]
 const SCREENSHOT_WAV: &[u8] = include_bytes!("../assets/screenshot.wav");
+#[cfg(windows)]
 const UPLOAD_WAV: &[u8] = include_bytes!("../assets/upload.wav");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

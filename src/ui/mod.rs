@@ -5,7 +5,7 @@ pub mod views;
 use iced::{Element, Task, Theme};
 use image::RgbaImage;
 
-use crate::capture::{CaptureMode, Rectangle, RegionCapture, WindowCapture, WindowInfo};
+use crate::capture::{CaptureMode, Rectangle, RegionCapture, WindowCapture};
 use crate::clipboard::{save_image, show_notification, ClipboardManager};
 use crate::config::{Config, ImageFormat, PostCaptureAction, UploadDestination};
 use crate::hotkeys::{HotkeyAction, HotkeyManager};
@@ -15,44 +15,22 @@ use crate::sound::Sound;
 use crate::upload::{CustomUploader, ImageUploader, UploadService};
 
 use self::style::MonochromeTheme;
-use self::views::{MainView, SettingsView, WindowPicker};
+use self::views::MainView;
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    Capture(CaptureMode),
-    ShowWindowPicker,
-    HideWindowPicker,
-    SelectWindow(u32),
-    ToggleGifRecording,
     SetFormat(ImageFormat),
     ShowSettings,
-    HideSettings,
-    BrowseOutputDir,
-    SetOutputDir(String),
-    ToggleShowCursor(bool),
-    SetCaptureDelay(u32),
-    SetGifFps(u32),
-    SetHotkey(String, String),
-    SetTheme(crate::config::Theme),
-    ToggleNotifications(bool),
-    ToggleClipboard(bool),
-    ToggleMinimizeToTray(bool),
     HotkeyTriggered(HotkeyAction),
     CaptureComplete(Result<String, String>),
     GifSaved(Result<String, String>),
     Tick,
-    WindowsListed(Vec<WindowInfo>),
     ImageCaptured(CapturedImage),
     PostCaptureAction(PostCaptureAction),
     SaveAs,
     SaveAsPath(Option<std::path::PathBuf>),
     UploadComplete(Result<(String, Option<String>), String>),
     CopyToClipboard,
-    SetPostCaptureAction(PostCaptureAction),
-    SetUploadDestination(UploadDestination),
-    SetCustomUploadUrl(String),
-    SetCustomFormName(String),
-    SetCustomResponsePath(String),
     DismissPostCapture,
 }
 
@@ -64,8 +42,6 @@ pub struct CapturedImage {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum View {
     Main,
-    Settings,
-    WindowPicker,
     PostCapture,
 }
 
@@ -75,7 +51,6 @@ pub struct App {
     view: View,
     recording_state: RecordingState,
     gif_recorder: Option<GifRecorder>,
-    windows: Vec<WindowInfo>,
     clipboard: Option<ClipboardManager>,
     hotkey_manager: Option<HotkeyManager>,
     pending_image: Option<std::sync::Arc<RgbaImage>>,
@@ -108,7 +83,6 @@ impl App {
             view: View::Main,
             recording_state: RecordingState::Idle,
             gif_recorder: None,
-            windows: Vec::new(),
             clipboard,
             hotkey_manager,
             pending_image: None,
@@ -134,22 +108,6 @@ impl App {
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::Capture(mode) => {
-                return self.perform_capture(mode);
-            }
-            Message::ShowWindowPicker => {
-                return self.perform_capture(CaptureMode::Window);
-            }
-            Message::HideWindowPicker => {
-                self.view = View::Main;
-            }
-            Message::SelectWindow(window_id) => {
-                self.view = View::Main;
-                return self.capture_window(window_id);
-            }
-            Message::ToggleGifRecording => {
-                return self.toggle_gif_recording();
-            }
             Message::SetFormat(format) => {
                 self.config.output.format = format;
                 let _ = self.config.save();
@@ -170,74 +128,6 @@ impl App {
                             .spawn();
                     }
                 }
-            }
-            Message::HideSettings => {
-                self.view = View::Main;
-                let _ = self.config.save();
-            }
-            Message::BrowseOutputDir => {
-                return Task::perform(
-                    async {
-                        if let Some(path) = rfd::AsyncFileDialog::new().pick_folder().await {
-                            return path.path().to_string_lossy().to_string();
-                        }
-                        String::new()
-                    },
-                    Message::SetOutputDir,
-                );
-            }
-            Message::SetOutputDir(dir) => {
-                if !dir.is_empty() {
-                    self.config.output.directory = dir.into();
-                    let _ = self.config.save();
-                }
-            }
-            Message::ToggleShowCursor(val) => {
-                self.config.capture.show_cursor = val;
-            }
-            Message::SetCaptureDelay(val) => {
-                self.config.capture.delay_ms = val;
-            }
-            Message::SetGifFps(val) => {
-                self.config.capture.gif_fps = val.clamp(1, 60);
-            }
-            Message::SetHotkey(action, hotkey) => {
-                if let Some(ref mut hm) = self.hotkey_manager {
-                    let hotkey_action = match action.as_str() {
-                        "screen" => Some(HotkeyAction::CaptureScreen),
-                        "window" => Some(HotkeyAction::CaptureWindow),
-                        "region" => Some(HotkeyAction::CaptureRegion),
-                        "gif" => Some(HotkeyAction::RecordGif),
-                        _ => None,
-                    };
-                    if let Some(hk_action) = hotkey_action {
-                        let _ = hm.unregister(hk_action);
-                        let _ = hm.register(hk_action, &hotkey);
-                    }
-                }
-                match action.as_str() {
-                    "screen" => self.config.hotkeys.capture_screen = hotkey,
-                    "window" => self.config.hotkeys.capture_window = hotkey,
-                    "region" => self.config.hotkeys.capture_region = hotkey,
-                    "gif" => self.config.hotkeys.record_gif = hotkey,
-                    _ => {}
-                }
-            }
-            Message::SetTheme(t) => {
-                self.config.ui.theme = t;
-                self.theme = match t {
-                    crate::config::Theme::Dark => MonochromeTheme::dark(),
-                    crate::config::Theme::Light => MonochromeTheme::light(),
-                };
-            }
-            Message::ToggleNotifications(val) => {
-                self.config.ui.show_notifications = val;
-            }
-            Message::ToggleClipboard(val) => {
-                self.config.ui.copy_to_clipboard = val;
-            }
-            Message::ToggleMinimizeToTray(val) => {
-                self.config.ui.minimize_to_tray = val;
             }
             Message::HotkeyTriggered(action) => {
                 match action {
@@ -300,9 +190,6 @@ impl App {
                         return Task::done(Message::HotkeyTriggered(action));
                     }
                 }
-            }
-            Message::WindowsListed(windows) => {
-                self.windows = windows;
             }
             Message::ImageCaptured(captured) => {
                 self.pending_image = Some(captured.image);
@@ -419,26 +306,6 @@ impl App {
             Message::CopyToClipboard => {
                 return self.copy_pending_to_clipboard();
             }
-            Message::SetPostCaptureAction(action) => {
-                self.config.post_capture.action = action;
-                let _ = self.config.save();
-            }
-            Message::SetUploadDestination(dest) => {
-                self.config.upload.destination = dest;
-                let _ = self.config.save();
-            }
-            Message::SetCustomUploadUrl(url) => {
-                self.config.upload.custom_url = url;
-                let _ = self.config.save();
-            }
-            Message::SetCustomFormName(name) => {
-                self.config.upload.custom_form_name = name;
-                let _ = self.config.save();
-            }
-            Message::SetCustomResponsePath(path) => {
-                self.config.upload.custom_response_path = path;
-                let _ = self.config.save();
-            }
             Message::DismissPostCapture => {
                 self.view = View::Main;
                 self.pending_image = None;
@@ -511,29 +378,6 @@ impl App {
                 )
             }
         }
-    }
-
-    fn capture_window(&mut self, window_id: u32) -> Task<Message> {
-        Task::perform(
-            async move {
-                use crate::capture::Capture;
-                let capture = if window_id == 0 {
-                    WindowCapture::focused().unwrap_or_else(|_| {
-                        WindowCapture::from_title("").unwrap_or_else(|_| WindowCapture::new(0))
-                    })
-                } else {
-                    WindowCapture::new(window_id)
-                };
-                let _window_info = capture.get_window_info();
-                capture.capture()
-            },
-            |result| match result {
-                Ok(image) => Message::ImageCaptured(CapturedImage {
-                    image: std::sync::Arc::new(image),
-                }),
-                Err(e) => Message::CaptureComplete(Err(e.to_string())),
-            },
-        )
     }
 
     fn toggle_gif_recording(&mut self) -> Task<Message> {
@@ -721,8 +565,6 @@ impl App {
                 self.config.output.format,
                 frame_count,
             ),
-            View::Settings => SettingsView::view(&self.theme, &self.config),
-            View::WindowPicker => WindowPicker::view(&self.theme, &self.windows),
             View::PostCapture => views::PostCaptureView::view(&self.theme),
         }
     }

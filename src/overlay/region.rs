@@ -149,7 +149,7 @@ impl RegionSelector {
             let _ = DestroyWindow(hwnd);
 
             if let Some(dc) = SCREEN_DC.lock().unwrap().take() {
-                DeleteDC(HDC(dc as *mut _));
+                let _ = DeleteDC(HDC(dc as *mut _));
             }
             if let Some(bmp) = SCREEN_BITMAP.lock().unwrap().take() {
                 let _ = DeleteObject(HBITMAP(bmp as *mut _));
@@ -243,11 +243,11 @@ unsafe extern "system" fn region_wnd_proc(
                     AlphaFormat: 0,
                 };
 
-                AlphaBlend(hdc, 0, 0, width, height, alpha_dc, 0, 0, width, height, blend).ok();
+                let _ = AlphaBlend(hdc, 0, 0, width, height, alpha_dc, 0, 0, width, height, blend).ok();
 
                 SelectObject(alpha_dc, old_alpha_bmp);
                 let _ = DeleteObject(alpha_bmp);
-                DeleteDC(alpha_dc);
+                let _ = DeleteDC(alpha_dc);
 
                 let border_pen = CreatePen(PS_SOLID, 2, windows::Win32::Foundation::COLORREF(0x00FF0000));
                 let dash_pen = CreatePen(PS_DASH, 1, windows::Win32::Foundation::COLORREF(0x00FFFFFF));
@@ -279,7 +279,7 @@ unsafe extern "system" fn region_wnd_proc(
                 windows::Win32::Graphics::Gdi::SetBkMode(hdc, windows::Win32::Graphics::Gdi::OPAQUE);
 
                 let text_wide: Vec<u16> = size_text.encode_utf16().collect();
-                windows::Win32::Graphics::Gdi::TextOutW(hdc, text_x, text_y, &text_wide);
+                let _ = windows::Win32::Graphics::Gdi::TextOutW(hdc, text_x, text_y, &text_wide);
             }
 
             let _ = DeleteObject(dim_brush);

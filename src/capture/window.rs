@@ -2,7 +2,9 @@ use anyhow::{anyhow, Result};
 use image::RgbaImage;
 use xcap::Window;
 
-use super::{Capture, WindowInfo};
+use super::Capture;
+#[cfg(test)]
+use super::WindowInfo;
 
 pub struct WindowCapture {
     window_id: u32,
@@ -13,6 +15,7 @@ impl WindowCapture {
         Self { window_id }
     }
 
+    #[cfg(test)]
     pub fn from_title(title: &str) -> Result<Self> {
         let windows = Window::all()?;
         let window = windows
@@ -24,6 +27,7 @@ impl WindowCapture {
         })
     }
 
+    #[cfg(test)]
     pub fn focused() -> Result<Self> {
         let windows = Window::all()?;
         let window = windows
@@ -43,20 +47,7 @@ impl WindowCapture {
             .ok_or_else(|| anyhow!("Window {} not found", self.window_id))
     }
 
-    pub fn get_window_info(&self) -> Result<WindowInfo> {
-        let window = self.find_window()?;
-        Ok(WindowInfo {
-            id: window.id(),
-            title: window.title().to_string(),
-            app_name: window.app_name().to_string(),
-            x: window.x(),
-            y: window.y(),
-            width: window.width(),
-            height: window.height(),
-            is_visible: !window.is_minimized(),
-        })
-    }
-
+    #[cfg(test)]
     pub fn list_application_windows() -> Result<Vec<WindowInfo>> {
         let windows = Window::all()?;
         let mut app_windows: Vec<WindowInfo> = windows
@@ -66,7 +57,6 @@ impl WindowCapture {
                     && w.width() > 50
                     && w.height() > 50
                     && !w.is_minimized()
-                    && !is_system_window(w)
             })
             .map(|w| WindowInfo {
                 id: w.id(),
@@ -76,33 +66,12 @@ impl WindowCapture {
                 y: w.y(),
                 width: w.width(),
                 height: w.height(),
-                is_visible: !w.is_minimized(),
             })
             .collect();
 
         app_windows.sort_by(|a, b| a.title.cmp(&b.title));
         Ok(app_windows)
     }
-}
-
-fn is_system_window(window: &Window) -> bool {
-    let title = window.title().to_lowercase();
-    let app = window.app_name().to_lowercase();
-
-    let system_keywords = [
-        "desktop",
-        "taskbar",
-        "start menu",
-        "notification",
-        "system tray",
-        "program manager",
-        "shell_traywnd",
-        "applicationframehost",
-    ];
-
-    system_keywords
-        .iter()
-        .any(|k| title.contains(k) || app.contains(k))
 }
 
 impl Capture for WindowCapture {

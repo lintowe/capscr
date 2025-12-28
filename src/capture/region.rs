@@ -12,12 +12,14 @@ impl RegionCapture {
         Self { region }
     }
 
+    #[cfg(test)]
     pub fn from_coords(start_x: i32, start_y: i32, end_x: i32, end_y: i32) -> Self {
         Self {
             region: Rectangle::normalize(start_x, start_y, end_x, end_y),
         }
     }
 
+    #[cfg(test)]
     pub fn region(&self) -> &Rectangle {
         &self.region
     }
