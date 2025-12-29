@@ -13,8 +13,6 @@ const MAX_GIF_DURATION_SECS: u32 = 300;
 const MAX_DELAY_MS: u32 = 30000;
 const MAX_FILENAME_TEMPLATE_LEN: usize = 128;
 const MAX_HOTKEY_LEN: usize = 64;
-const MIN_HDR_EXPOSURE: f32 = 0.1;
-const MAX_HDR_EXPOSURE: f32 = 10.0;
 const MAX_CUSTOM_URL_LEN: usize = 512;
 const MAX_FORM_NAME_LEN: usize = 64;
 const MAX_RESPONSE_PATH_LEN: usize = 128;
@@ -89,48 +87,6 @@ pub struct CaptureConfig {
     pub delay_ms: u32,
     pub gif_fps: u32,
     pub gif_max_duration_secs: u32,
-    #[serde(default)]
-    pub hdr_enabled: bool,
-    #[serde(default)]
-    pub hdr_tonemap: ToneMapMode,
-    #[serde(default = "default_hdr_exposure")]
-    pub hdr_exposure: f32,
-}
-
-fn default_hdr_exposure() -> f32 {
-    1.0
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-pub enum ToneMapMode {
-    #[default]
-    AcesFilmic,
-    Reinhard,
-    ReinhardExtended,
-    Hable,
-    Exposure,
-}
-
-impl ToneMapMode {
-    pub fn all() -> &'static [ToneMapMode] {
-        &[
-            ToneMapMode::AcesFilmic,
-            ToneMapMode::Reinhard,
-            ToneMapMode::ReinhardExtended,
-            ToneMapMode::Hable,
-            ToneMapMode::Exposure,
-        ]
-    }
-
-    pub fn display_name(&self) -> &'static str {
-        match self {
-            ToneMapMode::AcesFilmic => "ACES Filmic",
-            ToneMapMode::Reinhard => "Reinhard",
-            ToneMapMode::ReinhardExtended => "Reinhard Extended",
-            ToneMapMode::Hable => "Hable (Uncharted 2)",
-            ToneMapMode::Exposure => "Exposure Only",
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -261,12 +217,6 @@ impl Config {
         if self.capture.delay_ms > MAX_DELAY_MS {
             return Err(anyhow!("delay_ms must be <= {}", MAX_DELAY_MS));
         }
-        if !self.capture.hdr_exposure.is_finite()
-            || self.capture.hdr_exposure < MIN_HDR_EXPOSURE
-            || self.capture.hdr_exposure > MAX_HDR_EXPOSURE
-        {
-            return Err(anyhow!("hdr_exposure must be between {} and {}", MIN_HDR_EXPOSURE, MAX_HDR_EXPOSURE));
-        }
         if self.output.filename_template.len() > MAX_FILENAME_TEMPLATE_LEN {
             return Err(anyhow!("filename_template too long"));
         }
@@ -334,11 +284,6 @@ impl Config {
         self.capture.gif_fps = self.capture.gif_fps.clamp(MIN_GIF_FPS, MAX_GIF_FPS);
         self.capture.gif_max_duration_secs = self.capture.gif_max_duration_secs.min(MAX_GIF_DURATION_SECS);
         self.capture.delay_ms = self.capture.delay_ms.min(MAX_DELAY_MS);
-        self.capture.hdr_exposure = if self.capture.hdr_exposure.is_finite() {
-            self.capture.hdr_exposure.clamp(MIN_HDR_EXPOSURE, MAX_HDR_EXPOSURE)
-        } else {
-            1.0
-        };
 
         if self.output.filename_template.len() > MAX_FILENAME_TEMPLATE_LEN
             || self.output.filename_template.contains('/')
@@ -404,9 +349,6 @@ impl Default for Config {
                 delay_ms: 0,
                 gif_fps: 15,
                 gif_max_duration_secs: 30,
-                hdr_enabled: true,
-                hdr_tonemap: ToneMapMode::AcesFilmic,
-                hdr_exposure: 1.0,
             },
             hotkeys: HotkeyConfig {
                 capture_screen: "Ctrl+Shift+S".to_string(),

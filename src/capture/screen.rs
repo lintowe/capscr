@@ -134,7 +134,7 @@ impl Capture for ScreenCapture {
     fn capture(&self) -> Result<RgbaImage> {
         if HdrCapture::is_hdr_available() {
             let hdr = HdrCapture::new();
-            if let Ok(img) = hdr.capture_hdr() {
+            if let Ok(img) = hdr.capture() {
                 return Ok(img);
             }
         }

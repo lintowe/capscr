@@ -1,9 +1,7 @@
-#![allow(dead_code)]
-
 use anyhow::{anyhow, Result};
 use image::RgbaImage;
 
-use super::tonemapping::{ToneMapOperator, ToneMapper};
+use super::tonemapping;
 
 const MAX_HDR_DIMENSION: u32 = 16384;
 const MAX_HDR_PIXELS: usize = 256 * 1024 * 1024;
@@ -14,17 +12,6 @@ pub enum HdrFormat {
     Hdr10,
     ScRgb,
     Hlg,
-}
-
-impl HdrFormat {
-    pub fn display_name(&self) -> &'static str {
-        match self {
-            HdrFormat::Sdr => "SDR",
-            HdrFormat::Hdr10 => "HDR10 (PQ)",
-            HdrFormat::ScRgb => "scRGB",
-            HdrFormat::Hlg => "HLG",
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -48,47 +35,13 @@ impl Default for HdrDisplayInfo {
     }
 }
 
-pub struct HdrCapture {
-    tonemap_operator: ToneMapOperator,
-    exposure: f32,
-    auto_tonemap: bool,
-}
-
-impl Default for HdrCapture {
-    fn default() -> Self {
-        Self {
-            tonemap_operator: ToneMapOperator::AcesFilmic,
-            exposure: 1.0,
-            auto_tonemap: true,
-        }
-    }
-}
+/// HDR capture with automatic tonemapping to SDR.
+/// Uses Reinhard tonemapping like ShareX/Xbox Game Bar for consistent results.
+pub struct HdrCapture;
 
 impl HdrCapture {
     pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn with_operator(mut self, operator: ToneMapOperator) -> Self {
-        let valid = ToneMapOperator::all().contains(&operator);
-        if valid {
-            self.tonemap_operator = operator;
-        }
-        self
-    }
-
-    pub fn operator_name(&self) -> &'static str {
-        self.tonemap_operator.display_name()
-    }
-
-    pub fn with_exposure(mut self, exposure: f32) -> Self {
-        self.exposure = exposure.clamp(0.1, 10.0);
-        self
-    }
-
-    pub fn with_auto_tonemap(mut self, auto: bool) -> Self {
-        self.auto_tonemap = auto;
-        self
+        Self
     }
 
     pub fn get_display_hdr_info() -> Result<HdrDisplayInfo> {
@@ -108,7 +61,8 @@ impl HdrCapture {
             .unwrap_or(false)
     }
 
-    pub fn capture_hdr(&self) -> Result<RgbaImage> {
+    /// Capture HDR content and automatically tonemap to SDR.
+    pub fn capture(&self) -> Result<RgbaImage> {
         #[cfg(target_os = "windows")]
         {
             let hdr_info = Self::get_display_hdr_info()?;
@@ -117,7 +71,7 @@ impl HdrCapture {
                 return self.capture_sdr_fallback();
             }
 
-            let (raw_data, width, height, format) = self.capture_hdr_raw()?;
+            let (raw_data, width, height, format) = self.capture_raw()?;
 
             if width == 0 || height == 0 {
                 return Err(anyhow!("Invalid capture dimensions"));
@@ -126,18 +80,8 @@ impl HdrCapture {
                 return Err(anyhow!("Capture dimensions exceed maximum"));
             }
 
-            let sdr_white = if hdr_info.sdr_white_level > 0.0 {
-                hdr_info.sdr_white_level
-            } else {
-                80.0
-            };
-
-            if self.auto_tonemap {
-                let sdr_exposure = self.exposure * (80.0 / sdr_white);
-                Ok(self.tonemap_raw(&raw_data, width, height, format, sdr_exposure))
-            } else {
-                Ok(self.tonemap_raw(&raw_data, width, height, format, self.exposure))
-            }
+            let sdr_white = hdr_info.sdr_white_level.max(80.0);
+            Ok(self.tonemap(&raw_data, width, height, format, sdr_white))
         }
         #[cfg(not(target_os = "windows"))]
         {
@@ -145,7 +89,7 @@ impl HdrCapture {
         }
     }
 
-    pub fn capture_hdr_raw(&self) -> Result<(Vec<u8>, u32, u32, HdrFormat)> {
+    fn capture_raw(&self) -> Result<(Vec<u8>, u32, u32, HdrFormat)> {
         #[cfg(target_os = "windows")]
         {
             windows_hdr::capture_hdr_screen()
@@ -162,30 +106,7 @@ impl HdrCapture {
         capture.capture()
     }
 
-    pub fn tonemap_rgb10a2_data(&self, packed_data: &[u32], width: u32, height: u32) -> RgbaImage {
-        let mapper = ToneMapper::new(self.tonemap_operator)
-            .with_exposure(self.exposure)
-            .with_gamma(2.2)
-            .with_white_point(4.0);
-        mapper.tonemap_rgb10a2(packed_data, width, height)
-    }
-
-    pub fn linear_to_pq_value(linear: f32) -> f32 {
-        super::tonemapping::linear_to_pq(linear)
-    }
-
-    pub fn pq_inverse_value(linear: f32) -> f32 {
-        super::tonemapping::pq_eotf_inverse(linear)
-    }
-
-    fn tonemap_raw(
-        &self,
-        raw_data: &[u8],
-        width: u32,
-        height: u32,
-        format: HdrFormat,
-        exposure: f32,
-    ) -> RgbaImage {
+    fn tonemap(&self, raw_data: &[u8], width: u32, height: u32, format: HdrFormat, sdr_white: f32) -> RgbaImage {
         if width == 0 || height == 0 {
             return RgbaImage::new(1, 1);
         }
@@ -194,16 +115,6 @@ impl HdrCapture {
             Some(c) if c <= MAX_HDR_PIXELS => c,
             _ => return RgbaImage::new(1, 1),
         };
-
-        let clamped_exposure = exposure.clamp(0.1, 10.0);
-        if !clamped_exposure.is_finite() {
-            return RgbaImage::new(width, height);
-        }
-
-        let mapper = ToneMapper::new(self.tonemap_operator)
-            .with_exposure(clamped_exposure)
-            .with_gamma(2.2)
-            .with_white_point(4.0);
 
         match format {
             HdrFormat::ScRgb => {
@@ -219,11 +130,7 @@ impl HdrCapture {
                         if val.is_finite() { val } else { 0.0 }
                     })
                     .collect();
-                if exposure == 1.0 {
-                    super::tonemapping::scrgb_to_sdr(&float_data, width, height, clamped_exposure)
-                } else {
-                    mapper.tonemap_hdr_f32(&float_data, width, height)
-                }
+                tonemapping::scrgb_to_sdr(&float_data, width, height, sdr_white)
             }
             HdrFormat::Hdr10 => {
                 let expected_bytes = pixel_count.saturating_mul(8);
@@ -234,49 +141,21 @@ impl HdrCapture {
                     .chunks_exact(2)
                     .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
                     .collect();
-                if self.auto_tonemap {
-                    super::tonemapping::hdr10_to_sdr(&u16_data, width, height, clamped_exposure)
-                } else {
-                    mapper.tonemap_rgba16(&u16_data, width, height)
-                }
-            }
-            HdrFormat::Sdr => {
-                let expected_bytes = pixel_count.saturating_mul(4);
-                if raw_data.len() < expected_bytes {
-                    return RgbaImage::new(width, height);
-                }
-                let mut result = RgbaImage::new(width, height);
-                for (i, pixel) in raw_data.chunks_exact(4).enumerate() {
-                    if i >= pixel_count {
-                        break;
-                    }
-                    let x = (i as u32) % width;
-                    let y = (i as u32) / width;
-                    if exposure != 1.0 {
-                        let srgb_r = pixel[0] as f32 / 255.0;
-                        let srgb_g = pixel[1] as f32 / 255.0;
-                        let srgb_b = pixel[2] as f32 / 255.0;
-                        let linear_r = super::tonemapping::srgb_to_linear(srgb_r) * exposure;
-                        let linear_g = super::tonemapping::srgb_to_linear(srgb_g) * exposure;
-                        let linear_b = super::tonemapping::srgb_to_linear(srgb_b) * exposure;
-                        let sr = super::tonemapping::linear_to_srgb(linear_r.clamp(0.0, 1.0));
-                        let sg = super::tonemapping::linear_to_srgb(linear_g.clamp(0.0, 1.0));
-                        let sb = super::tonemapping::linear_to_srgb(linear_b.clamp(0.0, 1.0));
-                        let r = (sr * 255.0).clamp(0.0, 255.0) as u8;
-                        let g = (sg * 255.0).clamp(0.0, 255.0) as u8;
-                        let b = (sb * 255.0).clamp(0.0, 255.0) as u8;
-                        result.put_pixel(x, y, image::Rgba([r, g, b, pixel[3]]));
-                    } else {
-                        result.put_pixel(x, y, image::Rgba([pixel[0], pixel[1], pixel[2], pixel[3]]));
-                    }
-                }
-                result
+                tonemapping::hdr10_to_sdr(&u16_data, width, height, sdr_white)
             }
             HdrFormat::Hlg => {
                 let expected_bytes = pixel_count.saturating_mul(4);
                 if raw_data.len() < expected_bytes {
                     return RgbaImage::new(width, height);
                 }
+                tonemapping::hlg_to_sdr(raw_data, width, height, sdr_white)
+            }
+            HdrFormat::Sdr => {
+                // Already SDR, just copy
+                let expected_bytes = pixel_count.saturating_mul(4);
+                if raw_data.len() < expected_bytes {
+                    return RgbaImage::new(width, height);
+                }
                 let mut result = RgbaImage::new(width, height);
                 for (i, pixel) in raw_data.chunks_exact(4).enumerate() {
                     if i >= pixel_count {
@@ -284,24 +163,17 @@ impl HdrCapture {
                     }
                     let x = (i as u32) % width;
                     let y = (i as u32) / width;
-                    let hlg_r = pixel[0] as f32 / 255.0;
-                    let hlg_g = pixel[1] as f32 / 255.0;
-                    let hlg_b = pixel[2] as f32 / 255.0;
-                    let linear_r = super::tonemapping::hlg_oetf_inverse(hlg_r) * exposure;
-                    let linear_g = super::tonemapping::hlg_oetf_inverse(hlg_g) * exposure;
-                    let linear_b = super::tonemapping::hlg_oetf_inverse(hlg_b) * exposure;
-                    let (tr, tg, tb) = mapper.apply_operator(linear_r, linear_g, linear_b);
-                    let sr = super::tonemapping::linear_to_srgb(tr);
-                    let sg = super::tonemapping::linear_to_srgb(tg);
-                    let sb = super::tonemapping::linear_to_srgb(tb);
-                    let r = (sr * 255.0).clamp(0.0, 255.0) as u8;
-                    let g = (sg * 255.0).clamp(0.0, 255.0) as u8;
-                    let b = (sb * 255.0).clamp(0.0, 255.0) as u8;
-                    result.put_pixel(x, y, image::Rgba([r, g, b, pixel[3]]));
+                    result.put_pixel(x, y, image::Rgba([pixel[0], pixel[1], pixel[2], pixel[3]]));
                 }
                 result
             }
         }
+    }
+}
+
+impl Default for HdrCapture {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -536,53 +408,20 @@ mod windows_hdr {
     }
 }
 
-#[cfg(target_os = "macos")]
-mod macos_hdr {
-    use super::*;
-
-    pub fn get_hdr_display_info() -> Result<HdrDisplayInfo> {
-        Ok(HdrDisplayInfo::default())
-    }
-}
-
-#[cfg(target_os = "linux")]
-mod linux_hdr {
-    use super::*;
-
-    pub fn get_hdr_display_info() -> Result<HdrDisplayInfo> {
-        Ok(HdrDisplayInfo::default())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_hdr_format_display_names() {
-        assert_eq!(HdrFormat::Sdr.display_name(), "SDR");
-        assert_eq!(HdrFormat::Hdr10.display_name(), "HDR10 (PQ)");
-        assert_eq!(HdrFormat::ScRgb.display_name(), "scRGB");
-        assert_eq!(HdrFormat::Hlg.display_name(), "HLG");
-    }
-
-    #[test]
-    fn test_hdr_capture_default() {
-        let capture = HdrCapture::new();
-        let capture = capture
-            .with_operator(ToneMapOperator::Reinhard)
-            .with_exposure(2.0)
-            .with_auto_tonemap(false);
-        let is_available = HdrCapture::is_hdr_available();
-        assert!(is_available || !is_available);
-    }
 
     #[test]
     fn test_hdr_display_info_default() {
         let info = HdrDisplayInfo::default();
         assert!(!info.is_hdr_enabled);
         assert_eq!(info.format, HdrFormat::Sdr);
-        assert!(info.max_luminance >= 0.0);
-        assert!(info.min_luminance >= 0.0);
+    }
+
+    #[test]
+    fn test_hdr_capture_creation() {
+        let _capture = HdrCapture::new();
+        let _is_available = HdrCapture::is_hdr_available();
     }
 }
