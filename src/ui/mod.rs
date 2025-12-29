@@ -10,6 +10,7 @@ use crate::clipboard::{save_image, show_notification, ClipboardManager};
 use crate::config::{Config, ImageFormat, PostCaptureAction, UploadDestination};
 use crate::hotkeys::{HotkeyAction, HotkeyManager};
 use crate::overlay::{RegionSelector, WindowDetector};
+use crate::plugin::{PluginManager, PluginEvent, PluginResponse, CaptureType};
 use crate::recording::{GifRecorder, RecordingSettings, RecordingState};
 use crate::sound::Sound;
 use crate::upload::{CustomUploader, ImageUploader, UploadService};
@@ -63,6 +64,7 @@ pub struct App {
     gif_recorder: Option<GifRecorder>,
     clipboard: Option<ClipboardManager>,
     hotkey_manager: Option<HotkeyManager>,
+    plugin_manager: PluginManager,
     pending_image: Option<std::sync::Arc<RgbaImage>>,
     last_upload_url: Option<String>,
     last_delete_url: Option<String>,
@@ -88,6 +90,12 @@ impl App {
             let _ = hm.register(HotkeyAction::RecordGif, &config.hotkeys.record_gif);
         }
 
+        let mut plugin_manager = PluginManager::new();
+        let plugin_errors = plugin_manager.load_all();
+        for err in plugin_errors {
+            tracing::warn!("Plugin load error: {}", err);
+        }
+
         let app = Self {
             config,
             theme,
@@ -96,6 +104,7 @@ impl App {
             gif_recorder: None,
             clipboard,
             hotkey_manager,
+            plugin_manager,
             pending_image: None,
             last_upload_url: None,
             last_delete_url: None,
@@ -204,7 +213,23 @@ impl App {
                 }
             }
             Message::ImageCaptured(captured) => {
-                self.pending_image = Some(captured.image);
+                let mut image = captured.image;
+
+                let event = PluginEvent::PostCapture {
+                    image: image.clone(),
+                    mode: CaptureType::FullScreen,
+                };
+                match self.plugin_manager.dispatch(&event) {
+                    PluginResponse::Cancel => {
+                        return Task::none();
+                    }
+                    PluginResponse::ModifiedImage(modified) => {
+                        image = modified;
+                    }
+                    PluginResponse::Continue => {}
+                }
+
+                self.pending_image = Some(image);
                 match self.config.post_capture.action {
                     PostCaptureAction::PromptUser => {
                         self.view = View::PostCapture;

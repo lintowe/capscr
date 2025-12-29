@@ -70,7 +70,7 @@ uuid = { version = "1.0", features = ["v4"] }
 libloading = "0.8"
 zip = "2.2"
 semver = "1.0"
-wasmtime = "28.0"
+wasmtime = "35.0"  # Windows build issue in 36+, see: RUSTSEC-2025-0118 (low severity)
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.58", features = [
