@@ -66,6 +66,11 @@ notify-rust = "4.11"
 # UUID for unique identifiers
 uuid = { version = "1.0", features = ["v4"] }
 
+# Plugin system
+libloading = "0.8"
+zip = "2.2"
+semver = "1.0"
+
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.58", features = [
     "Win32_Foundation",
