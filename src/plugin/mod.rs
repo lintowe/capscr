@@ -2,9 +2,11 @@
 
 mod manifest;
 mod loader;
+mod wasm_runtime;
 
-pub use manifest::PluginManifest;
+pub use manifest::{PluginManifest, PluginType};
 pub use loader::PluginLoader;
+pub use wasm_runtime::WasmPlugin;
 
 use image::RgbaImage;
 use std::path::{Path, PathBuf};
@@ -65,10 +67,19 @@ pub trait Plugin: Send + Sync {
 
 pub type CreatePluginFn = fn() -> Box<dyn Plugin>;
 
+pub enum PluginHandle {
+    Native {
+        plugin: Box<dyn Plugin>,
+        _library: libloading::Library,
+    },
+    Wasm {
+        plugin: WasmPlugin,
+    },
+}
+
 pub struct LoadedPlugin {
     pub manifest: PluginManifest,
-    pub plugin: Box<dyn Plugin>,
-    _library: libloading::Library,
+    pub handle: PluginHandle,
 }
 
 pub struct PluginManager {
@@ -147,24 +158,24 @@ impl PluginManager {
 
     pub fn load_from_directory(&mut self, dir: &Path) -> Result<(), String> {
         let loader = PluginLoader::new(self.plugins_dir.clone());
-        let loaded = loader.load_from_directory(dir)?;
+        let mut loaded = loader.load_from_directory(dir)?;
 
-        let mut plugin = loaded.plugin;
-        plugin.on_load();
+        match &mut loaded.handle {
+            PluginHandle::Native { plugin, .. } => plugin.on_load(),
+            PluginHandle::Wasm { plugin } => plugin.on_load(),
+        }
 
-        self.plugins.push(LoadedPlugin {
-            manifest: loaded.manifest,
-            plugin,
-            _library: loaded._library,
-        });
-
+        self.plugins.push(loaded);
         Ok(())
     }
 
     pub fn unload(&mut self, plugin_id: &str) -> bool {
         if let Some(pos) = self.plugins.iter().position(|p| p.manifest.plugin.id == plugin_id) {
             let mut loaded = self.plugins.remove(pos);
-            loaded.plugin.on_unload();
+            match &mut loaded.handle {
+                PluginHandle::Native { plugin, .. } => plugin.on_unload(),
+                PluginHandle::Wasm { plugin } => plugin.on_unload(),
+            }
             true
         } else {
             false
@@ -187,7 +198,10 @@ impl PluginManager {
         let mut current_image: Option<Arc<RgbaImage>> = None;
 
         for loaded in &mut self.plugins {
-            let response = loaded.plugin.on_event(event);
+            let response = match &mut loaded.handle {
+                PluginHandle::Native { plugin, .. } => plugin.on_event(event),
+                PluginHandle::Wasm { plugin } => plugin.on_event(event),
+            };
             match response {
                 PluginResponse::Cancel => return PluginResponse::Cancel,
                 PluginResponse::ModifiedImage(img) => {
@@ -229,7 +243,10 @@ impl Default for PluginManager {
 impl Drop for PluginManager {
     fn drop(&mut self) {
         for loaded in &mut self.plugins {
-            loaded.plugin.on_unload();
+            match &mut loaded.handle {
+                PluginHandle::Native { plugin, .. } => plugin.on_unload(),
+                PluginHandle::Wasm { plugin } => plugin.on_unload(),
+            }
         }
     }
 }

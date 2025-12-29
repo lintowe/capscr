@@ -38,11 +38,19 @@ fn default_platforms() -> Vec<String> {
 #[derive(Debug, Clone, Deserialize)]
 pub struct PluginLibrary {
     #[serde(default)]
+    pub wasm: Option<String>,
+    #[serde(default)]
     pub windows: Option<String>,
     #[serde(default)]
     pub linux: Option<String>,
     #[serde(default)]
     pub macos: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PluginType {
+    Wasm,
+    Native,
 }
 
 impl PluginManifest {
@@ -158,7 +166,21 @@ impl PluginManifest {
         Ok(())
     }
 
+    pub fn plugin_type(&self) -> PluginType {
+        if self.library.wasm.is_some() {
+            PluginType::Wasm
+        } else {
+            PluginType::Native
+        }
+    }
+
     pub fn library_filename(&self) -> Option<&str> {
+        // Prefer WASM for universal compatibility
+        if let Some(ref wasm) = self.library.wasm {
+            return Some(wasm);
+        }
+
+        // Fall back to native
         if cfg!(windows) {
             self.library.windows.as_deref()
         } else if cfg!(target_os = "linux") {

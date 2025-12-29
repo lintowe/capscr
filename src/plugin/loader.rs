@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::io::Read;
 
-use super::{PluginManifest, LoadedPlugin};
+use super::{PluginManifest, PluginType, LoadedPlugin, WasmPlugin};
 
 pub struct PluginLoader {
     plugins_dir: PathBuf,
@@ -99,22 +99,32 @@ impl PluginLoader {
             return Err(format!("Library file not found: {}", library_path.display()));
         }
 
-        let library = unsafe {
-            libloading::Library::new(&library_path)
-                .map_err(|e| format!("Failed to load library: {}", e))?
+        let handle = match manifest.plugin_type() {
+            PluginType::Wasm => {
+                let plugin = WasmPlugin::load(
+                    &library_path,
+                    manifest.plugin.name.clone(),
+                    manifest.plugin.version.clone(),
+                    manifest.plugin.description.clone(),
+                )?;
+                super::PluginHandle::Wasm { plugin }
+            }
+            PluginType::Native => {
+                let library = unsafe {
+                    libloading::Library::new(&library_path)
+                        .map_err(|e| format!("Failed to load library: {}", e))?
+                };
+
+                let create_fn: libloading::Symbol<super::CreatePluginFn> = unsafe {
+                    library.get(b"create_plugin")
+                        .map_err(|e| format!("Failed to find create_plugin function: {}", e))?
+                };
+
+                let plugin = create_fn();
+                super::PluginHandle::Native { plugin, _library: library }
+            }
         };
 
-        let create_fn: libloading::Symbol<super::CreatePluginFn> = unsafe {
-            library.get(b"create_plugin")
-                .map_err(|e| format!("Failed to find create_plugin function: {}", e))?
-        };
-
-        let plugin = create_fn();
-
-        Ok(LoadedPlugin {
-            manifest,
-            plugin,
-            _library: library,
-        })
+        Ok(LoadedPlugin { manifest, handle })
     }
 }
