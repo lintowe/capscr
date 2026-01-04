@@ -7,7 +7,7 @@ use image::RgbaImage;
 use std::sync::Arc;
 
 use crate::capture::{Capture, Rectangle, RegionCapture, ScreenCapture, WindowCapture};
-use crate::clipboard::{save_image, show_notification, ClipboardManager};
+use crate::clipboard::{get_unique_filepath, save_image, show_notification, ClipboardManager};
 use crate::config::{Config, ImageFormat, PostCaptureAction, UploadDestination};
 use crate::hotkeys::{HotkeyAction, HotkeyManager};
 use crate::overlay::{RecordingOverlay, SelectionResult, UnifiedSelector};
@@ -643,7 +643,8 @@ impl App {
             let image = image.clone();
             let format = self.config.output.format;
             let quality = self.config.output.quality;
-            let output_path = self.config.output_path();
+            let base_path = self.config.output_path();
+            let output_path = get_unique_filepath(&base_path);
             self.pending_image = None;
             return Task::perform(
                 async move {

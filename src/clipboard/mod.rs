@@ -2,13 +2,16 @@ use anyhow::{anyhow, Result};
 use arboard::Clipboard;
 use image::RgbaImage;
 use std::path::Path;
+use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
 
 const MAX_IMAGE_DIMENSION: u32 = 16384;
 const MAX_NOTIFICATION_LEN: usize = 256;
-const CLIPBOARD_MAX_RETRIES: u32 = 5;
-const CLIPBOARD_INITIAL_DELAY_MS: u64 = 10;
+const CLIPBOARD_MAX_RETRIES: u32 = 20;
+const CLIPBOARD_RETRY_DELAY_MS: u64 = 100;
+
+static CLIPBOARD_LOCK: Mutex<()> = Mutex::new(());
 
 pub struct ClipboardManager {
     clipboard: Clipboard,
@@ -24,8 +27,9 @@ impl ClipboardManager {
     where
         F: FnMut(&mut Clipboard) -> std::result::Result<T, arboard::Error>,
     {
+        let _lock = CLIPBOARD_LOCK.lock().map_err(|_| anyhow!("Clipboard lock poisoned"))?;
+
         let mut last_error = None;
-        let mut delay = CLIPBOARD_INITIAL_DELAY_MS;
 
         for attempt in 0..CLIPBOARD_MAX_RETRIES {
             match operation(&mut self.clipboard) {
@@ -33,8 +37,7 @@ impl ClipboardManager {
                 Err(arboard::Error::ClipboardOccupied) => {
                     last_error = Some(arboard::Error::ClipboardOccupied);
                     if attempt < CLIPBOARD_MAX_RETRIES - 1 {
-                        thread::sleep(Duration::from_millis(delay));
-                        delay = (delay * 2).min(200);
+                        thread::sleep(Duration::from_millis(CLIPBOARD_RETRY_DELAY_MS));
                     }
                 }
                 Err(e) => return Err(anyhow!("Clipboard error: {}", e)),
@@ -89,6 +92,39 @@ const WINDOWS_RESERVED_NAMES: &[&str] = &[
     "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
     "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
 ];
+
+pub fn get_unique_filepath(path: &Path) -> std::path::PathBuf {
+    if !path.exists() {
+        return path.to_path_buf();
+    }
+
+    let parent = path.parent().unwrap_or(Path::new(""));
+    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("file");
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+
+    for i in 1..1000 {
+        let new_name = if ext.is_empty() {
+            format!("{}_{}", stem, i)
+        } else {
+            format!("{}_{}.{}", stem, i, ext)
+        };
+        let new_path = parent.join(&new_name);
+        if !new_path.exists() {
+            return new_path;
+        }
+    }
+
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let fallback_name = if ext.is_empty() {
+        format!("{}_{}", stem, timestamp)
+    } else {
+        format!("{}_{}.{}", stem, timestamp, ext)
+    };
+    parent.join(&fallback_name)
+}
 
 fn validate_filename(filename: &str) -> Result<()> {
     if filename.is_empty() {
