@@ -51,6 +51,15 @@ pub enum Message {
     SelectionComplete(SelectionResult),
     GifSelectionComplete(SelectionResult),
     ExitApp,
+    StartHotkeyRecording(HotkeyTarget),
+    CancelHotkeyRecording,
+    KeyPressed(iced::keyboard::Key, iced::keyboard::Modifiers),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HotkeyTarget {
+    Screenshot,
+    RecordGif,
 }
 
 #[derive(Debug, Clone)]
@@ -66,6 +75,9 @@ pub enum SettingChange {
     PostCaptureAction(PostCaptureAction),
     Theme(crate::config::Theme),
     PlaySound(bool),
+    UploadDestination(UploadDestination),
+    CustomUploadUrl(String),
+    CopyUrlToClipboard(bool),
 }
 
 #[derive(Debug, Clone)]
@@ -98,6 +110,7 @@ pub struct App {
     last_save_path: Option<std::path::PathBuf>,
     editor_state: Option<views::EditorState>,
     settings_state: views::SettingsState,
+    recording_hotkey: Option<HotkeyTarget>,
 }
 
 const ICON_DATA: &[u8] = include_bytes!("../../icon.ico");
@@ -158,6 +171,7 @@ impl App {
             last_save_path: None,
             editor_state: None,
             settings_state,
+            recording_hotkey: None,
         };
 
         (app, Task::none())
@@ -498,6 +512,39 @@ impl App {
             Message::ExitApp => {
                 std::process::exit(0);
             }
+            Message::StartHotkeyRecording(target) => {
+                self.recording_hotkey = Some(target);
+            }
+            Message::CancelHotkeyRecording => {
+                self.recording_hotkey = None;
+            }
+            Message::KeyPressed(key, modifiers) => {
+                if let Some(target) = self.recording_hotkey {
+                    if let iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape) = key {
+                        self.recording_hotkey = None;
+                    } else if let Some(hotkey_str) = self.build_hotkey_string(&key, &modifiers) {
+                        match target {
+                            HotkeyTarget::Screenshot => {
+                                if let Some(ref mut hm) = self.hotkey_manager {
+                                    let _ = hm.unregister(HotkeyAction::Screenshot);
+                                    let _ = hm.register(HotkeyAction::Screenshot, &hotkey_str);
+                                }
+                                self.config.hotkeys.screenshot = hotkey_str;
+                            }
+                            HotkeyTarget::RecordGif => {
+                                if let Some(ref mut hm) = self.hotkey_manager {
+                                    let _ = hm.unregister(HotkeyAction::RecordGif);
+                                    let _ = hm.register(HotkeyAction::RecordGif, &hotkey_str);
+                                }
+                                self.config.hotkeys.record_gif = hotkey_str;
+                            }
+                        }
+                        let _ = self.config.save();
+                        self.settings_state = views::SettingsState::from_config(&self.config);
+                        self.recording_hotkey = None;
+                    }
+                }
+            }
         }
         Task::none()
     }
@@ -807,9 +854,87 @@ impl App {
             SettingChange::PlaySound(play) => {
                 self.config.post_capture.play_sound = play;
             }
+            SettingChange::UploadDestination(dest) => {
+                self.config.upload.destination = dest;
+            }
+            SettingChange::CustomUploadUrl(url) => {
+                self.config.upload.custom_url = url;
+            }
+            SettingChange::CopyUrlToClipboard(copy) => {
+                self.config.upload.copy_url_to_clipboard = copy;
+            }
         }
         let _ = self.config.save();
         self.settings_state = views::SettingsState::from_config(&self.config);
+    }
+
+    fn build_hotkey_string(&self, key: &iced::keyboard::Key, modifiers: &iced::keyboard::Modifiers) -> Option<String> {
+        let mut parts = Vec::new();
+
+        if modifiers.control() {
+            parts.push("Ctrl");
+        }
+        if modifiers.alt() {
+            parts.push("Alt");
+        }
+        if modifiers.shift() {
+            parts.push("Shift");
+        }
+
+        let key_str = match key {
+            iced::keyboard::Key::Character(c) => {
+                let upper = c.to_uppercase().to_string();
+                if upper.len() == 1 && upper.chars().next().unwrap().is_alphanumeric() {
+                    Some(upper)
+                } else {
+                    None
+                }
+            }
+            iced::keyboard::Key::Named(named) => {
+                use iced::keyboard::key::Named;
+                match named {
+                    Named::F1 => Some("F1".to_string()),
+                    Named::F2 => Some("F2".to_string()),
+                    Named::F3 => Some("F3".to_string()),
+                    Named::F4 => Some("F4".to_string()),
+                    Named::F5 => Some("F5".to_string()),
+                    Named::F6 => Some("F6".to_string()),
+                    Named::F7 => Some("F7".to_string()),
+                    Named::F8 => Some("F8".to_string()),
+                    Named::F9 => Some("F9".to_string()),
+                    Named::F10 => Some("F10".to_string()),
+                    Named::F11 => Some("F11".to_string()),
+                    Named::F12 => Some("F12".to_string()),
+                    Named::Space => Some("Space".to_string()),
+                    Named::Enter => Some("Enter".to_string()),
+                    Named::Tab => Some("Tab".to_string()),
+                    Named::Insert => Some("Insert".to_string()),
+                    Named::Delete => Some("Delete".to_string()),
+                    Named::Home => Some("Home".to_string()),
+                    Named::End => Some("End".to_string()),
+                    Named::PageUp => Some("PageUp".to_string()),
+                    Named::PageDown => Some("PageDown".to_string()),
+                    Named::ArrowUp => Some("Up".to_string()),
+                    Named::ArrowDown => Some("Down".to_string()),
+                    Named::ArrowLeft => Some("Left".to_string()),
+                    Named::ArrowRight => Some("Right".to_string()),
+                    Named::PrintScreen => Some("PrintScreen".to_string()),
+                    _ => None,
+                }
+            }
+            _ => None,
+        };
+
+        if let Some(k) = key_str {
+            if parts.is_empty() {
+                None
+            } else {
+                parts.push(&k);
+                Some(parts.join("+"))
+            }
+        } else {
+            None
+        }
     }
 
     pub fn view(&self) -> Element<'_, Message> {
@@ -827,13 +952,22 @@ impl App {
                 }
             }
             View::Settings => {
-                views::SettingsView::view(&self.theme, &self.settings_state, &self.config)
+                views::SettingsView::view(&self.theme, &self.settings_state, &self.config, self.recording_hotkey)
             }
         }
     }
 
     pub fn subscription(&self) -> iced::Subscription<Message> {
-        iced::time::every(std::time::Duration::from_millis(100)).map(|_| Message::Tick)
+        let tick = iced::time::every(std::time::Duration::from_millis(100)).map(|_| Message::Tick);
+
+        if self.recording_hotkey.is_some() {
+            let keyboard = iced::keyboard::on_key_press(|key, modifiers| {
+                Some(Message::KeyPressed(key, modifiers))
+            });
+            iced::Subscription::batch([tick, keyboard])
+        } else {
+            tick
+        }
     }
 }
 

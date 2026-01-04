@@ -186,6 +186,12 @@ impl UploadDestination {
     }
 }
 
+impl std::fmt::Display for UploadDestination {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.display_name())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UploadConfig {
     pub destination: UploadDestination,

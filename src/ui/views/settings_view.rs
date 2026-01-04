@@ -1,12 +1,12 @@
 use iced::{
-    widget::{button, column, container, horizontal_space, pick_list, row, slider, text, toggler},
+    widget::{button, column, container, horizontal_space, pick_list, row, scrollable, slider, text, text_input, toggler},
     Alignment, Element, Length,
 };
 use std::path::PathBuf;
 
-use crate::config::{Config, ImageFormat, PostCaptureAction, Theme};
+use crate::config::{Config, ImageFormat, PostCaptureAction, Theme, UploadDestination};
 use crate::ui::style::MonochromeTheme;
-use crate::ui::{Message, SettingChange};
+use crate::ui::{HotkeyTarget, Message, SettingChange};
 
 #[derive(Debug, Clone)]
 pub struct SettingsState {
@@ -21,6 +21,9 @@ pub struct SettingsState {
     pub post_capture_action: PostCaptureAction,
     pub theme: Theme,
     pub play_sound: bool,
+    pub upload_destination: UploadDestination,
+    pub custom_upload_url: String,
+    pub copy_url_to_clipboard: bool,
 }
 
 impl SettingsState {
@@ -37,6 +40,9 @@ impl SettingsState {
             post_capture_action: config.post_capture.action,
             theme: config.ui.theme,
             play_sound: config.post_capture.play_sound,
+            upload_destination: config.upload.destination,
+            custom_upload_url: config.upload.custom_url.clone(),
+            copy_url_to_clipboard: config.upload.copy_url_to_clipboard,
         }
     }
 }
@@ -48,9 +54,24 @@ impl SettingsView {
         theme: &'a MonochromeTheme,
         state: &'a SettingsState,
         _config: &'a Config,
+        recording_hotkey: Option<HotkeyTarget>,
     ) -> Element<'a, Message> {
-        let title = text("Settings")
-            .size(24);
+        let title = text("Settings").size(24);
+
+        let appearance_section = column![
+            text("Appearance").size(18),
+            row![
+                text("Theme:").width(Length::Fixed(150.0)),
+                pick_list(
+                    Theme::all(),
+                    Some(state.theme),
+                    |t| Message::SettingChanged(SettingChange::Theme(t))
+                ),
+            ]
+            .spacing(10)
+            .align_y(Alignment::Center),
+        ]
+        .spacing(10);
 
         let output_section = column![
             text("Output").size(18),
@@ -83,17 +104,34 @@ impl SettingsView {
         ]
         .spacing(10);
 
+        let screenshot_hotkey_display = if recording_hotkey == Some(HotkeyTarget::Screenshot) {
+            "Press keys... (Esc to cancel)".to_string()
+        } else {
+            state.screenshot_hotkey.clone()
+        };
+
+        let gif_hotkey_display = if recording_hotkey == Some(HotkeyTarget::RecordGif) {
+            "Press keys... (Esc to cancel)".to_string()
+        } else {
+            state.gif_hotkey.clone()
+        };
+
         let hotkey_section = column![
             text("Hotkeys").size(18),
+            text("Click to change, then press your desired key combination").size(12),
             row![
                 text("Screenshot:").width(Length::Fixed(120.0)),
-                text(&state.screenshot_hotkey),
+                button(text(screenshot_hotkey_display))
+                    .padding([6, 12])
+                    .on_press(Message::StartHotkeyRecording(HotkeyTarget::Screenshot)),
             ]
             .spacing(10)
             .align_y(Alignment::Center),
             row![
                 text("Record GIF:").width(Length::Fixed(120.0)),
-                text(&state.gif_hotkey),
+                button(text(gif_hotkey_display))
+                    .padding([6, 12])
+                    .on_press(Message::StartHotkeyRecording(HotkeyTarget::RecordGif)),
             ]
             .spacing(10)
             .align_y(Alignment::Center),
@@ -124,20 +162,43 @@ impl SettingsView {
         ]
         .spacing(10);
 
-        let appearance_section = column![
-            text("Appearance").size(18),
+        let mut upload_section = column![
+            text("Upload").size(18),
             row![
-                text("Theme:").width(Length::Fixed(150.0)),
+                text("Destination:").width(Length::Fixed(150.0)),
                 pick_list(
-                    Theme::all(),
-                    Some(state.theme),
-                    |t| Message::SettingChanged(SettingChange::Theme(t))
+                    UploadDestination::all(),
+                    Some(state.upload_destination),
+                    |d| Message::SettingChanged(SettingChange::UploadDestination(d))
                 ),
             ]
             .spacing(10)
             .align_y(Alignment::Center),
         ]
         .spacing(10);
+
+        if state.upload_destination == UploadDestination::Custom {
+            upload_section = upload_section.push(
+                row![
+                    text("Custom URL:").width(Length::Fixed(150.0)),
+                    text_input("https://example.com/upload", &state.custom_upload_url)
+                        .on_input(|url| Message::SettingChanged(SettingChange::CustomUploadUrl(url)))
+                        .width(Length::Fixed(250.0)),
+                ]
+                .spacing(10)
+                .align_y(Alignment::Center),
+            );
+        }
+
+        upload_section = upload_section.push(
+            row![
+                text("Copy URL to clipboard:").width(Length::Fixed(150.0)),
+                toggler(state.copy_url_to_clipboard)
+                    .on_toggle(|v| Message::SettingChanged(SettingChange::CopyUrlToClipboard(v))),
+            ]
+            .spacing(10)
+            .align_y(Alignment::Center),
+        );
 
         let behavior_section = column![
             text("Behavior").size(18),
@@ -178,15 +239,16 @@ impl SettingsView {
             output_section,
             hotkey_section,
             gif_section,
+            upload_section,
             behavior_section,
             row![horizontal_space(), close_button],
         ]
         .spacing(20)
         .padding(20)
-        .width(Length::Fixed(450.0));
+        .width(Length::Fixed(480.0));
 
         let bg = theme.background();
-        container(content)
+        container(scrollable(content))
             .width(Length::Fill)
             .height(Length::Fill)
             .center_x(Length::Fill)
