@@ -86,6 +86,7 @@ impl GifRecorder {
         self
     }
 
+    #[allow(dead_code)]
     pub fn state(&self) -> RecordingState {
         *self.state.lock().unwrap_or_else(|e| e.into_inner())
     }
@@ -215,6 +216,7 @@ impl GifRecorder {
         }
     }
 
+    #[allow(dead_code)]
     pub fn frame_count(&self) -> usize {
         self.frames.lock().unwrap_or_else(|e| e.into_inner()).len()
     }

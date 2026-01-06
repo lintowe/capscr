@@ -114,6 +114,7 @@ impl TrayManager {
         Ok((tray_icon, screenshot_id, gif_id, settings_id, exit_id))
     }
 
+    #[allow(dead_code)]
     pub fn mark_for_recreation(&mut self) {
         self.tray_icon = None;
     }
@@ -150,6 +151,7 @@ impl TrayManager {
         self.is_recording = recording;
     }
 
+    #[allow(dead_code)]
     pub fn is_recording(&self) -> bool {
         self.is_recording
     }
