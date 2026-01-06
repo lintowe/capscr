@@ -20,6 +20,7 @@ use crate::upload::{CustomUploader, ImageUploader, UploadService};
 use self::style::MonochromeTheme;
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum Message {
     SetFormat(ImageFormat),
     HotkeyTriggered(HotkeyAction),
@@ -63,6 +64,7 @@ pub enum HotkeyTarget {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum SettingChange {
     OutputDirectory(std::path::PathBuf),
     Format(ImageFormat),
@@ -600,6 +602,7 @@ impl App {
         )
     }
 
+    #[allow(unused_variables)]
     fn get_window_rect(&self, hwnd: u32) -> Option<Rectangle> {
         #[cfg(windows)]
         {
