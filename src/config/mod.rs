@@ -24,6 +24,7 @@ const MAX_TICK_INTERVAL_MS: u32 = 500;
 pub struct Config {
     pub output: OutputConfig,
     pub capture: CaptureConfig,
+    #[serde(default)]
     pub hotkeys: HotkeyConfig,
     pub ui: UiConfig,
     #[serde(default)]
@@ -32,6 +33,96 @@ pub struct Config {
     pub upload: UploadConfig,
     #[serde(default)]
     pub performance: PerformanceConfig,
+    #[serde(default = "default_capture_tasks")]
+    pub capture_tasks: Vec<CaptureTask>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct CaptureTask {
+    pub id: String,
+    pub name: String,
+    pub hotkey: String,
+    pub capture_mode: TaskCaptureMode,
+    pub post_action: TaskPostAction,
+    #[serde(default)]
+    pub target_destination: Option<TaskUploadTarget>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum TaskCaptureMode {
+    Region,
+    Window,
+    Fullscreen,
+    ActiveMonitor,
+    RegionGif,
+}
+
+impl TaskCaptureMode {
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            TaskCaptureMode::Region => "Region",
+            TaskCaptureMode::Window => "Window",
+            TaskCaptureMode::Fullscreen => "Fullscreen (selector)",
+            TaskCaptureMode::ActiveMonitor => "Active monitor",
+            TaskCaptureMode::RegionGif => "Region GIF",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum TaskPostAction {
+    Clipboard,
+    SaveFile,
+    Upload,
+    SaveAndClipboard,
+    OpenEditor,
+    Prompt,
+}
+
+impl TaskPostAction {
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            TaskPostAction::Clipboard => "Copy to clipboard",
+            TaskPostAction::SaveFile => "Save to file",
+            TaskPostAction::Upload => "Upload",
+            TaskPostAction::SaveAndClipboard => "Save and copy",
+            TaskPostAction::OpenEditor => "Open editor",
+            TaskPostAction::Prompt => "Ask each time",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum TaskUploadTarget {
+    Imgur,
+    Custom,
+    Ftp,
+    Sftp,
+}
+
+fn default_capture_tasks() -> Vec<CaptureTask> {
+    vec![
+        CaptureTask {
+            id: "screenshot-clipboard".to_string(),
+            name: "Screenshot to clipboard".to_string(),
+            hotkey: "PrintScreen".to_string(),
+            capture_mode: TaskCaptureMode::Region,
+            post_action: TaskPostAction::Clipboard,
+            target_destination: None,
+        },
+        CaptureTask {
+            id: "gif-save".to_string(),
+            name: "Region GIF to file".to_string(),
+            hotkey: "Ctrl+Shift+G".to_string(),
+            capture_mode: TaskCaptureMode::RegionGif,
+            post_action: TaskPostAction::SaveFile,
+            target_destination: None,
+        },
+    ]
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -150,10 +241,12 @@ impl Default for HdrConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct HotkeyConfig {
+    #[serde(default)]
     pub screenshot: String,
+    #[serde(default)]
     pub record_gif: String,
 }
 
@@ -450,6 +543,40 @@ impl Config {
                 "hdr.user_brightness_scale must be between 0 (exclusive) and 100"
             ));
         }
+
+        let mut seen_ids = std::collections::HashSet::new();
+        for task in &self.capture_tasks {
+            if task.id.is_empty()
+                || !task.id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+            {
+                return Err(anyhow!(
+                    "capture_task id '{}' must be lowercase alphanumeric with hyphens",
+                    task.id
+                ));
+            }
+            if task.id.len() > 64 {
+                return Err(anyhow!("capture_task id too long: {}", task.id));
+            }
+            if !seen_ids.insert(task.id.clone()) {
+                return Err(anyhow!("duplicate capture_task id: {}", task.id));
+            }
+            if task.name.is_empty() || task.name.len() > 128 {
+                return Err(anyhow!("capture_task name length invalid for {}", task.id));
+            }
+            if task.hotkey.len() > MAX_HOTKEY_LEN {
+                return Err(anyhow!("capture_task '{}' hotkey too long", task.id));
+            }
+            if !task
+                .hotkey
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '+' || c == ' ')
+            {
+                return Err(anyhow!(
+                    "capture_task '{}' hotkey contains invalid characters",
+                    task.id
+                ));
+            }
+        }
         Ok(())
     }
 
@@ -546,6 +673,7 @@ impl Default for Config {
             post_capture: PostCaptureConfig::default(),
             upload: UploadConfig::default(),
             performance: PerformanceConfig::default(),
+            capture_tasks: default_capture_tasks(),
         }
     }
 }

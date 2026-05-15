@@ -1,7 +1,6 @@
 #![allow(dead_code)]
 
-use crate::config::Config;
-use crate::hotkeys::HotkeyAction;
+use crate::config::{CaptureTask, Config};
 use crate::plugin::PluginManager;
 use crate::recording::{GifRecorder, RecordingState};
 use std::path::PathBuf;
@@ -9,10 +8,7 @@ use std::sync::mpsc::Sender;
 use std::sync::Mutex;
 
 pub enum HotkeyCommand {
-    Reload {
-        screenshot: String,
-        record_gif: String,
-    },
+    Reload { tasks: Vec<CaptureTask> },
 }
 
 pub struct AppState {
@@ -50,16 +46,9 @@ impl AppState {
         }
     }
 
-    pub fn send_hotkey_reload(&self, screenshot: String, record_gif: String) {
+    pub fn send_hotkey_reload(&self, tasks: Vec<CaptureTask>) {
         if let Some(tx) = self.hotkey_tx.lock().unwrap().as_ref() {
-            let _ = tx.send(HotkeyCommand::Reload {
-                screenshot,
-                record_gif,
-            });
+            let _ = tx.send(HotkeyCommand::Reload { tasks });
         }
     }
-}
-
-pub fn hotkey_action_from_id(id: u32, registered: &std::collections::HashMap<u32, HotkeyAction>) -> Option<HotkeyAction> {
-    registered.get(&id).copied()
 }

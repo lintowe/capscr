@@ -7,45 +7,23 @@ use global_hotkey::{
 };
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum HotkeyAction {
-    Screenshot,
-    RecordGif,
-}
-
-impl HotkeyAction {
-    pub fn all() -> &'static [HotkeyAction] {
-        &[
-            HotkeyAction::Screenshot,
-            HotkeyAction::RecordGif,
-        ]
-    }
-
-    pub fn display_name(&self) -> &'static str {
-        match self {
-            HotkeyAction::Screenshot => "Screenshot",
-            HotkeyAction::RecordGif => "Record GIF",
-        }
-    }
-}
-
 pub struct HotkeyManager {
     manager: GlobalHotKeyManager,
-    registered: HashMap<u32, HotkeyAction>,
+    registered: HashMap<u32, String>,
     registration_errors: Vec<HotkeyRegistrationError>,
 }
 
 #[derive(Debug, Clone)]
 pub struct HotkeyRegistrationError {
-    pub action: HotkeyAction,
+    pub task_id: String,
     pub hotkey: String,
     pub reason: String,
 }
 
 impl HotkeyManager {
     pub fn new() -> Result<Self> {
-        let manager = GlobalHotKeyManager::new().map_err(|e| anyhow!("Failed to create hotkey manager: {}", e))?;
-
+        let manager = GlobalHotKeyManager::new()
+            .map_err(|e| anyhow!("Failed to create hotkey manager: {}", e))?;
         Ok(Self {
             manager,
             registered: HashMap::new(),
@@ -53,22 +31,22 @@ impl HotkeyManager {
         })
     }
 
-    pub fn register(&mut self, action: HotkeyAction, hotkey_str: &str) -> Result<()> {
+    pub fn register(&mut self, task_id: impl Into<String>, hotkey_str: &str) -> Result<()> {
         let hotkey = parse_hotkey(hotkey_str)?;
         self.manager
             .register(hotkey)
             .map_err(|e| anyhow!("Failed to register hotkey: {}", e))?;
-
-        self.registered.insert(hotkey.id(), action);
+        self.registered.insert(hotkey.id(), task_id.into());
         Ok(())
     }
 
-    pub fn try_register(&mut self, action: HotkeyAction, hotkey_str: &str) {
-        match self.register(action, hotkey_str) {
+    pub fn try_register(&mut self, task_id: impl Into<String>, hotkey_str: &str) {
+        let task_id = task_id.into();
+        match self.register(task_id.clone(), hotkey_str) {
             Ok(()) => {}
             Err(e) => {
                 self.registration_errors.push(HotkeyRegistrationError {
-                    action,
+                    task_id,
                     hotkey: hotkey_str.to_string(),
                     reason: e.to_string(),
                 });
@@ -84,22 +62,9 @@ impl HotkeyManager {
         !self.registration_errors.is_empty()
     }
 
-    pub fn unregister(&mut self, action: HotkeyAction) -> Result<()> {
-        let id_to_remove: Option<u32> = self
-            .registered
-            .iter()
-            .find(|(_, &a)| a == action)
-            .map(|(&id, _)| id);
-
-        if let Some(id) = id_to_remove {
-            self.registered.remove(&id);
-        }
-        Ok(())
-    }
-
-    pub fn poll(&self) -> Option<HotkeyAction> {
+    pub fn poll(&self) -> Option<String> {
         if let Ok(event) = GlobalHotKeyEvent::receiver().try_recv() {
-            return self.registered.get(&event.id).copied();
+            return self.registered.get(&event.id).cloned();
         }
         None
     }
@@ -117,16 +82,13 @@ pub fn format_hotkey_string(s: &str) -> String {
     }
 }
 
-fn parse_hotkey(s: &str) -> Result<HotKey> {
+pub fn parse_hotkey(s: &str) -> Result<HotKey> {
     let parts: Vec<&str> = s.split('+').map(|p| p.trim()).collect();
-
     if parts.is_empty() {
         return Err(anyhow!("Empty hotkey string"));
     }
-
     let mut modifiers = Modifiers::empty();
     let mut key_code: Option<Code> = None;
-
     for part in parts {
         let lower = part.to_lowercase();
         match lower.as_str() {
@@ -139,7 +101,6 @@ fn parse_hotkey(s: &str) -> Result<HotKey> {
             }
         }
     }
-
     let code = key_code.ok_or_else(|| anyhow!("No key specified in hotkey"))?;
     Ok(HotKey::new(Some(modifiers), code))
 }
@@ -195,6 +156,18 @@ fn parse_key_code(s: &str) -> Result<Code> {
         "F10" => Code::F10,
         "F11" => Code::F11,
         "F12" => Code::F12,
+        "F13" => Code::F13,
+        "F14" => Code::F14,
+        "F15" => Code::F15,
+        "F16" => Code::F16,
+        "F17" => Code::F17,
+        "F18" => Code::F18,
+        "F19" => Code::F19,
+        "F20" => Code::F20,
+        "F21" => Code::F21,
+        "F22" => Code::F22,
+        "F23" => Code::F23,
+        "F24" => Code::F24,
         "SPACE" => Code::Space,
         "ENTER" | "RETURN" => Code::Enter,
         "TAB" => Code::Tab,
@@ -211,6 +184,24 @@ fn parse_key_code(s: &str) -> Result<Code> {
         "LEFT" => Code::ArrowLeft,
         "RIGHT" => Code::ArrowRight,
         "PRINTSCREEN" | "PRTSC" | "PRINT" => Code::PrintScreen,
+        "PAUSE" | "PAUSEBREAK" | "BREAK" => Code::Pause,
+        "SCROLLLOCK" | "SCROLL" => Code::ScrollLock,
+        "NUMPAD0" | "NUM0" | "KP0" => Code::Numpad0,
+        "NUMPAD1" | "NUM1" | "KP1" => Code::Numpad1,
+        "NUMPAD2" | "NUM2" | "KP2" => Code::Numpad2,
+        "NUMPAD3" | "NUM3" | "KP3" => Code::Numpad3,
+        "NUMPAD4" | "NUM4" | "KP4" => Code::Numpad4,
+        "NUMPAD5" | "NUM5" | "KP5" => Code::Numpad5,
+        "NUMPAD6" | "NUM6" | "KP6" => Code::Numpad6,
+        "NUMPAD7" | "NUM7" | "KP7" => Code::Numpad7,
+        "NUMPAD8" | "NUM8" | "KP8" => Code::Numpad8,
+        "NUMPAD9" | "NUM9" | "KP9" => Code::Numpad9,
+        "NUMPADADD" | "NUMADD" | "KPADD" => Code::NumpadAdd,
+        "NUMPADSUB" | "NUMSUB" | "KPSUB" | "NUMPADSUBTRACT" => Code::NumpadSubtract,
+        "NUMPADMUL" | "NUMMUL" | "KPMUL" | "NUMPADMULTIPLY" => Code::NumpadMultiply,
+        "NUMPADDIV" | "NUMDIV" | "KPDIV" | "NUMPADDIVIDE" => Code::NumpadDivide,
+        "NUMPADDOT" | "NUMDOT" | "KPDOT" | "NUMPADDECIMAL" => Code::NumpadDecimal,
+        "NUMPADENTER" | "KPENTER" => Code::NumpadEnter,
         _ => return Err(anyhow!("Unknown key: {}", s)),
     };
     Ok(code)
@@ -218,7 +209,6 @@ fn parse_key_code(s: &str) -> Result<Code> {
 
 pub fn format_hotkey(modifiers: Modifiers, code: Code) -> String {
     let mut parts = Vec::new();
-
     if modifiers.contains(Modifiers::CONTROL) {
         parts.push("Ctrl");
     }
@@ -231,7 +221,6 @@ pub fn format_hotkey(modifiers: Modifiers, code: Code) -> String {
     if modifiers.contains(Modifiers::SUPER) {
         parts.push("Win");
     }
-
     parts.push(format_code(code));
     parts.join("+")
 }
@@ -302,6 +291,24 @@ pub fn format_code(code: Code) -> &'static str {
         Code::ArrowLeft => "Left",
         Code::ArrowRight => "Right",
         Code::PrintScreen => "PrintScreen",
+        Code::Pause => "Pause",
+        Code::ScrollLock => "ScrollLock",
+        Code::Numpad0 => "Numpad0",
+        Code::Numpad1 => "Numpad1",
+        Code::Numpad2 => "Numpad2",
+        Code::Numpad3 => "Numpad3",
+        Code::Numpad4 => "Numpad4",
+        Code::Numpad5 => "Numpad5",
+        Code::Numpad6 => "Numpad6",
+        Code::Numpad7 => "Numpad7",
+        Code::Numpad8 => "Numpad8",
+        Code::Numpad9 => "Numpad9",
+        Code::NumpadAdd => "NumpadAdd",
+        Code::NumpadSubtract => "NumpadSubtract",
+        Code::NumpadMultiply => "NumpadMultiply",
+        Code::NumpadDivide => "NumpadDivide",
+        Code::NumpadDecimal => "NumpadDecimal",
+        Code::NumpadEnter => "NumpadEnter",
         _ => "?",
     }
 }
@@ -337,9 +344,21 @@ mod tests {
     }
 
     #[test]
-    fn test_hotkey_action_display_names() {
-        for action in HotkeyAction::all() {
-            assert!(!action.display_name().is_empty());
-        }
+    fn test_parse_numpad5() {
+        let hk = parse_hotkey("Numpad5").expect("parse");
+        assert_eq!(hk.mods, Modifiers::empty());
+    }
+
+    #[test]
+    fn test_parse_pause() {
+        let hk = parse_hotkey("Pause").expect("parse");
+        assert_eq!(hk.mods, Modifiers::empty());
+    }
+
+    #[test]
+    fn test_parse_ctrl_shift_s() {
+        let hk = parse_hotkey("Ctrl+Shift+S").expect("parse");
+        assert!(hk.mods.contains(Modifiers::CONTROL));
+        assert!(hk.mods.contains(Modifiers::SHIFT));
     }
 }

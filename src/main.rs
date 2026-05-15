@@ -60,9 +60,7 @@ fn main() {
     let _ = config.ensure_output_dir();
     install_hdr_runtime_from_config(&config);
 
-    let initial_screenshot = config.hotkeys.screenshot.clone();
-    let initial_record_gif = config.hotkeys.record_gif.clone();
-
+    let initial_tasks = config.capture_tasks.clone();
     let app_state = state::AppState::new(config);
 
     tauri::Builder::default()
@@ -80,12 +78,7 @@ fn main() {
                 let st = app.state::<state::AppState>();
                 *st.hotkey_tx.lock().unwrap() = Some(tx);
             }
-            spawn_hotkey_thread(
-                app.handle().clone(),
-                rx,
-                initial_screenshot.clone(),
-                initial_record_gif.clone(),
-            );
+            spawn_hotkey_thread(app.handle().clone(), rx, initial_tasks.clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -154,7 +147,18 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
         .show_menu_on_left_click(false)
         .tooltip("capscr")
         .on_menu_event(|app, event| match event.id.as_ref() {
-            "screenshot" => commands::trigger_hotkey(app, hotkeys::HotkeyAction::Screenshot),
+            "screenshot" => {
+                let app = app.clone();
+                std::thread::spawn(move || {
+                    if let Err(e) = commands::run_capture_pipeline(
+                        commands::CaptureModeArg::Region,
+                        commands::PostActionArg::Clipboard,
+                        &app,
+                    ) {
+                        tracing::warn!("tray screenshot failed: {e}");
+                    }
+                });
+            }
             "fullscreen" => {
                 let app = app.clone();
                 std::thread::spawn(move || {
@@ -167,7 +171,18 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
                     }
                 });
             }
-            "record_gif" => commands::trigger_hotkey(app, hotkeys::HotkeyAction::RecordGif),
+            "record_gif" => {
+                let app = app.clone();
+                std::thread::spawn(move || {
+                    if let Err(e) = commands::run_capture_pipeline(
+                        commands::CaptureModeArg::Region,
+                        commands::PostActionArg::SaveFile,
+                        &app,
+                    ) {
+                        tracing::warn!("tray record_gif failed: {e}");
+                    }
+                });
+            }
             "settings" => {
                 let _ = commands::open_hub_window(app);
             }
@@ -192,8 +207,7 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
 fn spawn_hotkey_thread(
     app: tauri::AppHandle,
     rx: mpsc::Receiver<HotkeyCommand>,
-    initial_screenshot: String,
-    initial_record_gif: String,
+    initial_tasks: Vec<config::CaptureTask>,
 ) {
     std::thread::spawn(move || {
         let mut hm = match hotkeys::HotkeyManager::new() {
@@ -203,37 +217,36 @@ fn spawn_hotkey_thread(
                 return;
             }
         };
-        hm.try_register(hotkeys::HotkeyAction::Screenshot, &initial_screenshot);
-        hm.try_register(hotkeys::HotkeyAction::RecordGif, &initial_record_gif);
+        for task in &initial_tasks {
+            hm.try_register(task.id.clone(), &task.hotkey);
+        }
         for err in hm.take_errors() {
             tracing::warn!(
-                "hotkey '{}' for {:?} failed: {}",
+                "hotkey '{}' for task '{}' failed: {}",
                 err.hotkey,
-                err.action,
+                err.task_id,
                 err.reason
             );
         }
 
         loop {
             while let Ok(cmd) = rx.try_recv() {
-                let HotkeyCommand::Reload {
-                    screenshot,
-                    record_gif,
-                } = cmd;
+                let HotkeyCommand::Reload { tasks } = cmd;
                 hm.unregister_all();
-                hm.try_register(hotkeys::HotkeyAction::Screenshot, &screenshot);
-                hm.try_register(hotkeys::HotkeyAction::RecordGif, &record_gif);
+                for task in &tasks {
+                    hm.try_register(task.id.clone(), &task.hotkey);
+                }
                 for err in hm.take_errors() {
                     tracing::warn!(
-                        "hotkey '{}' for {:?} failed: {}",
+                        "hotkey '{}' for task '{}' failed: {}",
                         err.hotkey,
-                        err.action,
+                        err.task_id,
                         err.reason
                     );
                 }
             }
-            if let Some(action) = hm.poll() {
-                commands::trigger_hotkey(&app, action);
+            if let Some(task_id) = hm.poll() {
+                commands::trigger_task(&app, &task_id);
             }
             std::thread::sleep(Duration::from_millis(100));
         }

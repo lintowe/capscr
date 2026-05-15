@@ -46,6 +46,21 @@ export interface UiConfig {
   minimize_to_tray: boolean;
 }
 
+export interface CaptureTask {
+  id: string;
+  name: string;
+  hotkey: string;
+  capture_mode: "region" | "window" | "fullscreen" | "active-monitor" | "region-gif";
+  post_action:
+    | "clipboard"
+    | "save-file"
+    | "upload"
+    | "save-and-clipboard"
+    | "open-editor"
+    | "prompt";
+  target_destination?: "imgur" | "custom" | "ftp" | "sftp" | null;
+}
+
 export interface AppConfig {
   output: OutputConfig;
   capture: CaptureConfig;
@@ -57,6 +72,7 @@ export interface AppConfig {
     play_sound: boolean;
   };
   upload: UploadConfig;
+  capture_tasks: CaptureTask[];
 }
 
 export interface HistoryEntry {

@@ -3,8 +3,9 @@ import { Settings } from "./views/Settings";
 import { History } from "./views/History";
 import { Destinations } from "./views/Destinations";
 import { Marketplace } from "./views/Marketplace";
+import { Tasks } from "./views/Tasks";
 
-type Tab = "settings" | "history" | "destinations" | "marketplace";
+type Tab = "settings" | "tasks" | "history" | "destinations" | "marketplace";
 
 export function App() {
   const [tab, setTab] = createSignal<Tab>("settings");
@@ -18,6 +19,12 @@ export function App() {
           onClick={() => setTab("settings")}
         >
           Settings
+        </div>
+        <div
+          classList={{ tab: true, active: tab() === "tasks" }}
+          onClick={() => setTab("tasks")}
+        >
+          Tasks
         </div>
         <div
           classList={{ tab: true, active: tab() === "history" }}
@@ -41,6 +48,9 @@ export function App() {
       <main class="content">
         <Show when={tab() === "settings"}>
           <Settings />
+        </Show>
+        <Show when={tab() === "tasks"}>
+          <Tasks />
         </Show>
         <Show when={tab() === "history"}>
           <History />

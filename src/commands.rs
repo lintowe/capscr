@@ -2,8 +2,9 @@
 
 use crate::capture::{Capture, RegionCapture, ScreenCapture, WindowCapture};
 use crate::clipboard::{get_unique_filepath, save_image, show_notification, ClipboardManager};
-use crate::config::{Config, PostCaptureAction, UploadDestination};
-use crate::hotkeys::HotkeyAction;
+use crate::config::{
+    CaptureTask, Config, PostCaptureAction, TaskCaptureMode, TaskPostAction, UploadDestination,
+};
 use crate::overlay::{SelectionResult, UnifiedSelector};
 use crate::plugin::{CaptureType, PluginEvent, PluginResponse};
 use crate::sound::Sound;
@@ -54,10 +55,7 @@ pub fn set_config(config: Config, state: State<AppState>) -> Result<(), String> 
     config.validate().map_err(|e| e.to_string())?;
     config.save().map_err(|e| e.to_string())?;
     crate::install_hdr_runtime_from_config(&config);
-    state.send_hotkey_reload(
-        config.hotkeys.screenshot.clone(),
-        config.hotkeys.record_gif.clone(),
-    );
+    state.send_hotkey_reload(config.capture_tasks.clone());
     *state.config.lock().unwrap() = config;
     Ok(())
 }
@@ -418,29 +416,70 @@ pub fn open_hub_window(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-pub fn trigger_hotkey(app: &AppHandle, action: HotkeyAction) {
-    let post = {
+pub fn trigger_task(app: &AppHandle, task_id: &str) {
+    let task = {
         let state = app.state::<AppState>();
         let config = state.config.lock().unwrap();
-        match action {
-            HotkeyAction::Screenshot => match config.post_capture.action {
-                PostCaptureAction::SaveToFile => PostActionArg::SaveFile,
-                PostCaptureAction::CopyToClipboard => PostActionArg::Clipboard,
-                PostCaptureAction::SaveAndCopy => PostActionArg::SaveAndClipboard,
-                PostCaptureAction::Upload => PostActionArg::Upload,
-                PostCaptureAction::PromptUser => PostActionArg::Prompt,
-            },
-            HotkeyAction::RecordGif => PostActionArg::SaveFile,
-        }
+        config
+            .capture_tasks
+            .iter()
+            .find(|t| t.id == task_id)
+            .cloned()
     };
-    let mode = match action {
-        HotkeyAction::Screenshot => CaptureModeArg::Region,
-        HotkeyAction::RecordGif => CaptureModeArg::Region,
+    let Some(task) = task else {
+        tracing::warn!("hotkey fired for unknown task id: {task_id}");
+        return;
     };
-    let app = app.clone();
+    let app_handle = app.clone();
     std::thread::spawn(move || {
-        if let Err(e) = run_capture_pipeline(mode, post, &app) {
-            tracing::warn!("hotkey-triggered capture failed: {e}");
+        if let Err(e) = run_task(&task, &app_handle) {
+            tracing::warn!("task '{}' failed: {e}", task.id);
+            let state = app_handle.state::<AppState>();
+            let show = state.config.lock().unwrap().ui.show_notifications;
+            if show {
+                let _ = show_notification(&format!("Task '{}' failed", task.name), &e.to_string());
+            }
         }
     });
+}
+
+pub fn run_task(task: &CaptureTask, app: &AppHandle) -> anyhow::Result<()> {
+    let mode = match task.capture_mode {
+        TaskCaptureMode::Region | TaskCaptureMode::Window | TaskCaptureMode::Fullscreen => {
+            CaptureModeArg::from_task_mode(task.capture_mode)
+        }
+        TaskCaptureMode::ActiveMonitor => CaptureModeArg::ActiveMonitor,
+        TaskCaptureMode::RegionGif => {
+            // GIF recording is async; phase 2 ships still-image only.
+            // Phase 3 stub: treat as still region capture for now.
+            CaptureModeArg::Region
+        }
+    };
+    let post = PostActionArg::from_task_action(task.post_action);
+    run_capture_pipeline(mode, post, app)
+}
+
+impl CaptureModeArg {
+    pub fn from_task_mode(mode: TaskCaptureMode) -> Self {
+        match mode {
+            TaskCaptureMode::Region => CaptureModeArg::Region,
+            TaskCaptureMode::Window => CaptureModeArg::Window,
+            TaskCaptureMode::Fullscreen => CaptureModeArg::Fullscreen,
+            TaskCaptureMode::ActiveMonitor => CaptureModeArg::ActiveMonitor,
+            TaskCaptureMode::RegionGif => CaptureModeArg::Region,
+        }
+    }
+}
+
+impl PostActionArg {
+    pub fn from_task_action(action: TaskPostAction) -> Self {
+        match action {
+            TaskPostAction::Clipboard => PostActionArg::Clipboard,
+            TaskPostAction::SaveFile => PostActionArg::SaveFile,
+            TaskPostAction::Upload => PostActionArg::Upload,
+            TaskPostAction::SaveAndClipboard => PostActionArg::SaveAndClipboard,
+            TaskPostAction::OpenEditor => PostActionArg::OpenEditor,
+            TaskPostAction::Prompt => PostActionArg::Prompt,
+        }
+    }
 }
