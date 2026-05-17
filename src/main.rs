@@ -14,7 +14,7 @@ mod upload;
 
 use std::sync::mpsc;
 use std::time::Duration;
-use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::Manager;
 use tracing_subscriber::EnvFilter;
@@ -76,6 +76,7 @@ fn main() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
+        .plugin(tauri_plugin_window_state::Builder::default().build())
         .manage(app_state)
         .setup(move |app| {
             build_tray(app)?;
@@ -103,6 +104,7 @@ fn main() {
             commands::list_installed_plugins,
             commands::open_plugins_folder,
             commands::get_editor_image_path,
+            commands::open_editor,
             commands::save_edited_image,
             commands::copy_edited_image_to_clipboard,
             commands::upload_edited_image,
@@ -139,36 +141,66 @@ fn sync_autostart(app: &tauri::App, desired: bool) {
 }
 
 fn build_tray(app: &tauri::App) -> tauri::Result<()> {
-    let screenshot_item = MenuItem::with_id(
+    // --- Capture submenu ---
+    let cap_region =
+        MenuItem::with_id(app, "cap_region", "Region", true, None::<&str>)?;
+    let cap_window =
+        MenuItem::with_id(app, "cap_window", "Window", true, None::<&str>)?;
+    let cap_fullscreen =
+        MenuItem::with_id(app, "cap_fullscreen", "Fullscreen (selector)", true, None::<&str>)?;
+    let cap_active =
+        MenuItem::with_id(app, "cap_active_monitor", "Active monitor", true, None::<&str>)?;
+    let capture_submenu = Submenu::with_items(
         app,
-        "screenshot",
-        "Take Screenshot (region)",
+        "Capture",
+        true,
+        &[&cap_region, &cap_window, &cap_fullscreen, &cap_active],
+    )?;
+
+    // --- Record submenu ---
+    let rec_region_gif = MenuItem::with_id(
+        app,
+        "rec_region_gif",
+        "Region GIF (toggle)",
         true,
         None::<&str>,
     )?;
-    let fullscreen_item = MenuItem::with_id(
+    let record_submenu =
+        Submenu::with_items(app, "Record", true, &[&rec_region_gif])?;
+
+    // --- Upload / utility items ---
+    let copy_last_url = MenuItem::with_id(
         app,
-        "fullscreen",
-        "Fullscreen Screenshot",
+        "copy_last_url",
+        "Copy last upload URL",
         true,
         None::<&str>,
     )?;
-    let record_gif_item =
-        MenuItem::with_id(app, "record_gif", "Record GIF (region)", true, None::<&str>)?;
+    let open_captures = MenuItem::with_id(
+        app,
+        "open_captures",
+        "Open captures folder",
+        true,
+        None::<&str>,
+    )?;
+
     let separator1 = PredefinedMenuItem::separator(app)?;
-    let settings_item = MenuItem::with_id(app, "settings", "Open hub", true, None::<&str>)?;
     let separator2 = PredefinedMenuItem::separator(app)?;
+    let separator3 = PredefinedMenuItem::separator(app)?;
+    let settings_item = MenuItem::with_id(app, "settings", "Open hub", true, None::<&str>)?;
     let exit_item = MenuItem::with_id(app, "exit", "Exit", true, None::<&str>)?;
 
     let menu = Menu::with_items(
         app,
         &[
-            &screenshot_item,
-            &fullscreen_item,
-            &record_gif_item,
+            &capture_submenu,
+            &record_submenu,
             &separator1,
-            &settings_item,
+            &copy_last_url,
+            &open_captures,
             &separator2,
+            &settings_item,
+            &separator3,
             &exit_item,
         ],
     )?;
@@ -183,48 +215,84 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
         .menu(&menu)
         .show_menu_on_left_click(false)
         .tooltip("capscr")
-        .on_menu_event(|app, event| match event.id.as_ref() {
-            "screenshot" => {
+        .on_menu_event(|app, event| {
+            use commands::{CaptureModeArg, PostActionArg};
+            let id = event.id.as_ref();
+            let spawn_capture = |mode: CaptureModeArg, post: PostActionArg| {
                 let app = app.clone();
                 std::thread::spawn(move || {
-                    if let Err(e) = commands::run_capture_pipeline(
-                        commands::CaptureModeArg::Region,
-                        commands::PostActionArg::Clipboard,
-                        &app,
-                    ) {
-                        tracing::warn!("tray screenshot failed: {e}");
+                    if let Err(e) = commands::run_capture_pipeline(mode, post, &app) {
+                        tracing::warn!("tray capture failed: {e}");
+                        commands::emit_error(&app, "capture", &e.to_string());
                     }
                 });
-            }
-            "fullscreen" => {
-                let app = app.clone();
-                std::thread::spawn(move || {
-                    if let Err(e) = commands::run_capture_pipeline(
-                        commands::CaptureModeArg::ActiveMonitor,
-                        commands::PostActionArg::Clipboard,
-                        &app,
-                    ) {
-                        tracing::warn!("fullscreen capture failed: {e}");
+            };
+            match id {
+                "cap_region" => spawn_capture(CaptureModeArg::Region, PostActionArg::Clipboard),
+                "cap_window" => spawn_capture(CaptureModeArg::Window, PostActionArg::Clipboard),
+                "cap_fullscreen" => {
+                    spawn_capture(CaptureModeArg::Fullscreen, PostActionArg::Clipboard)
+                }
+                "cap_active_monitor" => {
+                    spawn_capture(CaptureModeArg::ActiveMonitor, PostActionArg::Clipboard)
+                }
+                "rec_region_gif" => {
+                    // Synthesize a tray-driven gif task so run_gif_task's start/stop
+                    // toggle (keyed off the task id in AppState) works the same as
+                    // a real hotkey-bound task.
+                    let app = app.clone();
+                    std::thread::spawn(move || {
+                        let task = config::CaptureTask {
+                            id: "__tray_gif".into(),
+                            name: "Tray GIF".into(),
+                            hotkey: String::new(),
+                            capture_mode: config::TaskCaptureMode::RegionGif,
+                            post_action: config::TaskPostAction::SaveFile,
+                            target_destination: None,
+                        };
+                        if let Err(e) = commands::run_task(&task, &app) {
+                            tracing::warn!("tray gif failed: {e}");
+                            commands::emit_error(&app, "gif", &e.to_string());
+                        }
+                    });
+                }
+                "copy_last_url" => {
+                    let st = app.state::<state::AppState>();
+                    let last = st.last_upload.lock().unwrap().clone();
+                    match last {
+                        Some(rec) => {
+                            if let Err(e) = crate::upload::copy_url_to_clipboard(&rec.url) {
+                                tracing::warn!("copy last url failed: {e}");
+                            } else if st.config.lock().unwrap().ui.show_notifications {
+                                let _ = crate::clipboard::show_notification(
+                                    "Copied",
+                                    &rec.url,
+                                );
+                            }
+                        }
+                        None => {
+                            let _ = crate::clipboard::show_notification(
+                                "No uploads yet",
+                                "Upload something first and the URL will land here.",
+                            );
+                        }
                     }
-                });
+                }
+                "open_captures" => {
+                    let st = app.state::<state::AppState>();
+                    let dir = st.config.lock().unwrap().output.directory.clone();
+                    let _ = std::fs::create_dir_all(&dir);
+                    use tauri_plugin_opener::OpenerExt;
+                    let _ = app
+                        .opener()
+                        .open_path(dir.to_string_lossy().to_string(), None::<&str>);
+                }
+                "settings" => {
+                    let _ = commands::open_hub_window(app);
+                }
+                "exit" => app.exit(0),
+                _ => {}
             }
-            "record_gif" => {
-                let app = app.clone();
-                std::thread::spawn(move || {
-                    if let Err(e) = commands::run_capture_pipeline(
-                        commands::CaptureModeArg::Region,
-                        commands::PostActionArg::SaveFile,
-                        &app,
-                    ) {
-                        tracing::warn!("tray record_gif failed: {e}");
-                    }
-                });
-            }
-            "settings" => {
-                let _ = commands::open_hub_window(app);
-            }
-            "exit" => app.exit(0),
-            _ => {}
         })
         .on_tray_icon_event(|tray, event| {
             if let TrayIconEvent::Click {

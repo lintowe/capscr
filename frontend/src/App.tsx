@@ -117,7 +117,10 @@ function Hub() {
 
   const onClose = () => {
     const c = config();
-    if (c && c.ui.minimize_to_tray) {
+    // Default to hide-to-tray when config hasn't loaded yet — destroying the
+    // window on early X-clicks just forces a slow re-create on the next tray
+    // click and loses webview state.
+    if (!c || c.ui.minimize_to_tray) {
       void win.hide();
     } else {
       void win.close();
@@ -147,7 +150,7 @@ function Hub() {
         </nav>
         <div class="sidebar-foot">
           <span class="path">~/.capscr</span>
-          <span>v0.3.9 / master</span>
+          <span>v0.3.10 / master</span>
         </div>
       </aside>
 
@@ -181,7 +184,7 @@ function Hub() {
             : `${captures()?.length ?? 0} captures on disk`}
         </span>
         <span class="grow" />
-        <span class="tail">capscr v0.3.9</span>
+        <span class="tail">capscr v0.3.10</span>
       </footer>
 
       <Show when={dragOver()}>
