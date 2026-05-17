@@ -111,4 +111,5 @@ export const api = {
   getAutostart: () => invoke<boolean>("get_autostart"),
   uploadFile: (path: string) =>
     invoke<{ url: string; delete_url: string | null }>("upload_file", { path }),
+  openEditor: (path: string) => invoke<void>("open_editor", { path }),
 };

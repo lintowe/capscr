@@ -1,5 +1,5 @@
-import { createResource, For, Show } from "solid-js";
-import { Copy, RefreshCw, ExternalLink, Trash2 } from "lucide-solid";
+import { createResource, createSignal, For, Show } from "solid-js";
+import { Copy, RefreshCw, ExternalLink, Trash2, Edit3 } from "lucide-solid";
 import { api } from "../api";
 
 function formatBytes(b: number): string {
@@ -20,6 +20,23 @@ function formatDate(unix: number): string {
 
 export function History() {
   const [entries, { refetch }] = createResource(api.listCaptures);
+  // Track which path is in the "confirm delete" state. Second click on the
+  // trash icon within 4s commits; otherwise the prompt resets.
+  const [confirmDelete, setConfirmDelete] = createSignal<string | null>(null);
+
+  const armDelete = (path: string) => {
+    setConfirmDelete(path);
+    setTimeout(() => {
+      if (confirmDelete() === path) setConfirmDelete(null);
+    }, 4000);
+  };
+
+  const doDelete = (path: string) => {
+    api.deleteCapture(path).then(() => {
+      setConfirmDelete(null);
+      refetch();
+    });
+  };
 
   return (
     <>
@@ -53,7 +70,15 @@ export function History() {
         <div class="tiles">
           <For each={entries()}>
             {(e) => (
-              <div class="tile">
+              <div
+                class="tile"
+                onClick={(ev) => {
+                  // Don't open the editor when the click landed on an
+                  // overlay button.
+                  if ((ev.target as HTMLElement).closest(".tile-actions")) return;
+                  void api.openEditor(e.path);
+                }}
+              >
                 <img
                   class="tile-img"
                   src={`asset://localhost/${encodeURIComponent(e.path)}`}
@@ -64,6 +89,13 @@ export function History() {
                   }}
                 />
                 <div class="tile-actions">
+                  <button
+                    class="icon-btn"
+                    title="edit"
+                    onClick={() => api.openEditor(e.path)}
+                  >
+                    <Edit3 size={12} stroke-width={1.5} />
+                  </button>
                   <button
                     class="icon-btn"
                     title="open in os viewer"
@@ -80,8 +112,17 @@ export function History() {
                   </button>
                   <button
                     class="icon-btn"
-                    title="delete"
-                    onClick={() => api.deleteCapture(e.path).then(refetch)}
+                    classList={{ "is-arm": confirmDelete() === e.path }}
+                    title={
+                      confirmDelete() === e.path
+                        ? "click again to confirm"
+                        : "delete"
+                    }
+                    onClick={() =>
+                      confirmDelete() === e.path
+                        ? doDelete(e.path)
+                        : armDelete(e.path)
+                    }
                   >
                     <Trash2 size={12} stroke-width={1.5} />
                   </button>

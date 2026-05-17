@@ -324,9 +324,28 @@ export function Editor() {
     redraw();
   }
 
-  async function exportPng(): Promise<Uint8Array> {
+  function targetMime(): string {
+    const path = imagePath() ?? "";
+    const ext = path.split(".").pop()?.toLowerCase() ?? "png";
+    switch (ext) {
+      case "jpg":
+      case "jpeg":
+        return "image/jpeg";
+      case "webp":
+        return "image/webp";
+      // bmp and gif aren't first-class encoders in browsers; fall through to png
+      // to avoid silently writing wrong bytes to an extension we can't honour.
+      default:
+        return "image/png";
+    }
+  }
+
+  async function exportBytes(mime: string): Promise<Uint8Array> {
     const blob: Blob = await new Promise((res, rej) => {
-      canvasRef.toBlob((b) => (b ? res(b) : rej(new Error("toBlob failed"))), "image/png");
+      canvasRef.toBlob(
+        (b) => (b ? res(b) : rej(new Error(`toBlob(${mime}) failed`))),
+        mime,
+      );
     });
     const buf = await blob.arrayBuffer();
     return new Uint8Array(buf);
@@ -338,7 +357,10 @@ export function Editor() {
     setBusy("save");
     setStatus({ tone: "", msg: "writing..." });
     try {
-      const bytes = await exportPng();
+      // Encode in the source file's format so we don't write PNG bytes to a
+      // .jpg path (which would silently corrupt the file for downstream
+      // consumers that trust the extension).
+      const bytes = await exportBytes(targetMime());
       await invoke<void>("save_edited_image", {
         bytes: Array.from(bytes),
         targetPath: path,
@@ -356,7 +378,9 @@ export function Editor() {
     setBusy("copy");
     setStatus({ tone: "", msg: "copying..." });
     try {
-      const bytes = await exportPng();
+      // Clipboard always wants PNG — that's what the Rust ClipboardManager
+      // expects to decode.
+      const bytes = await exportBytes("image/png");
       await invoke<void>("copy_edited_image_to_clipboard", {
         bytes: Array.from(bytes),
       });
@@ -372,7 +396,9 @@ export function Editor() {
     setBusy("upload");
     setStatus({ tone: "", msg: "uploading..." });
     try {
-      const bytes = await exportPng();
+      // Upload path also expects PNG — the existing ImageUploader.upload
+      // re-encodes, so we feed it canonical bytes.
+      const bytes = await exportBytes("image/png");
       const result = await invoke<{ url: string; delete_url: string | null }>(
         "upload_edited_image",
         { bytes: Array.from(bytes) },

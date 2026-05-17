@@ -507,6 +507,19 @@ pub fn get_editor_image_path(state: State<AppState>) -> Option<String> {
 }
 
 #[tauri::command]
+pub fn open_editor(path: String, app: AppHandle, state: State<AppState>) -> Result<(), String> {
+    let buf = PathBuf::from(&path);
+    let canonical = std::fs::canonicalize(&buf).map_err(|e| e.to_string())?;
+    let cfg = state.config.lock().unwrap().clone();
+    let dir_canonical =
+        std::fs::canonicalize(&cfg.output.directory).map_err(|e| e.to_string())?;
+    if !canonical.starts_with(&dir_canonical) {
+        return Err("Path is outside the configured output directory".into());
+    }
+    open_editor_window(&app, &canonical.to_string_lossy()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub fn save_edited_image(
     bytes: Vec<u8>,
     target_path: String,

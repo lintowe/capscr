@@ -1343,3 +1343,14 @@ kbd {
   from { background-position: 100% 0; }
   to { background-position: -100% 0; }
 }
+
+.tile {
+  cursor: pointer;
+}
+
+.icon-btn.is-arm {
+  background: var(--paper) !important;
+  color: var(--ink-0) !important;
+  outline: 1px solid var(--paper);
+  outline-offset: 1px;
+}
