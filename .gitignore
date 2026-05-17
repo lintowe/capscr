@@ -3,3 +3,6 @@
 /frontend/dist
 /gen/schemas
 /signing
+/.claude
+build.log
+build-*.log

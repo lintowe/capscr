@@ -63,6 +63,8 @@ fn main() {
     let initial_tasks = config.capture_tasks.clone();
     let app_state = state::AppState::new(config);
 
+    let autostart_desired = app_state.config.lock().unwrap().ui.auto_start;
+
     tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_notification::init())
@@ -70,9 +72,14 @@ fn main() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .manage(app_state)
         .setup(move |app| {
             build_tray(app)?;
+            sync_autostart(app, autostart_desired);
             let (tx, rx) = mpsc::channel::<HotkeyCommand>();
             {
                 let st = app.state::<state::AppState>();
@@ -91,14 +98,39 @@ fn main() {
             commands::reupload_capture,
             commands::open_in_explorer,
             commands::exit_app,
+            commands::set_autostart,
+            commands::get_autostart,
+            commands::list_installed_plugins,
+            commands::open_plugins_folder,
         ])
         .build(tauri::generate_context!())
         .expect("error while building capscr")
         .run(|_app, event| {
-            if let tauri::RunEvent::ExitRequested { api, .. } = &event {
-                api.prevent_exit();
+            if let tauri::RunEvent::ExitRequested { code, api, .. } = &event {
+                if code.is_none() {
+                    api.prevent_exit();
+                }
             }
         });
+}
+
+fn sync_autostart(app: &tauri::App, desired: bool) {
+    use tauri_plugin_autostart::ManagerExt;
+    let manager = app.autolaunch();
+    match manager.is_enabled() {
+        Ok(current) if current == desired => {}
+        Ok(_) => {
+            let res = if desired {
+                manager.enable()
+            } else {
+                manager.disable()
+            };
+            if let Err(e) = res {
+                tracing::warn!("autostart sync failed: {e}");
+            }
+        }
+        Err(e) => tracing::warn!("autostart query failed: {e}"),
+    }
 }
 
 fn build_tray(app: &tauri::App) -> tauri::Result<()> {

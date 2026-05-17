@@ -1,6 +1,6 @@
 [package]
 name = "capscr"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2021"
 description = "A clean, modern screen capture tool with HDR support"
 authors = ["capscr"]
@@ -20,6 +20,7 @@ tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-updater = "2"
+tauri-plugin-autostart = "2"
 
 # Global hotkeys (native, polled from a tokio task)
 global-hotkey = "0.6"
