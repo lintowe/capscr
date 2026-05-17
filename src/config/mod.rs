@@ -256,6 +256,8 @@ pub struct UiConfig {
     pub show_notifications: bool,
     pub copy_to_clipboard: bool,
     pub minimize_to_tray: bool,
+    #[serde(default)]
+    pub auto_start: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -702,6 +704,7 @@ impl Default for Config {
                 show_notifications: true,
                 copy_to_clipboard: true,
                 minimize_to_tray: true,
+                auto_start: false,
             },
             post_capture: PostCaptureConfig::default(),
             upload: UploadConfig::default(),

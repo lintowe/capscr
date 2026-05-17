@@ -14,7 +14,9 @@ use image::RgbaImage;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
+use tauri_plugin_autostart::ManagerExt as AutostartManagerExt;
+use tauri_plugin_opener::OpenerExt;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -51,12 +53,25 @@ pub fn get_config(state: State<AppState>) -> Result<Config, String> {
 }
 
 #[tauri::command]
-pub fn set_config(config: Config, state: State<AppState>) -> Result<(), String> {
+pub fn set_config(config: Config, app: AppHandle, state: State<AppState>) -> Result<(), String> {
     config.validate().map_err(|e| e.to_string())?;
     config.save().map_err(|e| e.to_string())?;
     crate::install_hdr_runtime_from_config(&config);
     state.send_hotkey_reload(config.capture_tasks.clone());
+    let want_autostart = config.ui.auto_start;
     *state.config.lock().unwrap() = config;
+    let manager = app.autolaunch();
+    let current = manager.is_enabled().unwrap_or(false);
+    if current != want_autostart {
+        let res = if want_autostart {
+            manager.enable()
+        } else {
+            manager.disable()
+        };
+        if let Err(e) = res {
+            tracing::warn!("autostart toggle failed: {e}");
+        }
+    }
     Ok(())
 }
 
@@ -70,6 +85,7 @@ pub fn take_screenshot(
     std::thread::spawn(move || {
         if let Err(e) = run_capture_pipeline(mode, post, &app_handle) {
             tracing::warn!("capture failed: {e}");
+            emit_error(&app_handle, "capture", &e.to_string());
             let state = app_handle.state::<AppState>();
             let show = state.config.lock().unwrap().ui.show_notifications;
             if show {
@@ -456,7 +472,7 @@ pub fn open_hub_window(app: &AppHandle) -> tauri::Result<()> {
         .inner_size(900.0, 640.0)
         .min_inner_size(720.0, 480.0)
         .resizable(true)
-        .decorations(true)
+        .decorations(false)
         .visible(true)
         .build()?;
     Ok(())
@@ -477,13 +493,19 @@ pub fn trigger_task(app: &AppHandle, task_id: &str) {
         return;
     };
     let app_handle = app.clone();
+    let task_label = task.name.clone();
     std::thread::spawn(move || {
         if let Err(e) = run_task(&task, &app_handle) {
             tracing::warn!("task '{}' failed: {e}", task.id);
+            emit_error(
+                &app_handle,
+                "task",
+                &format!("{}: {}", task_label, e),
+            );
             let state = app_handle.state::<AppState>();
             let show = state.config.lock().unwrap().ui.show_notifications;
             if show {
-                let _ = show_notification(&format!("Task '{}' failed", task.name), &e.to_string());
+                let _ = show_notification(&format!("Task '{}' failed", task_label), &e.to_string());
             }
         }
     });
@@ -528,4 +550,116 @@ impl PostActionArg {
             TaskPostAction::Prompt => PostActionArg::Prompt,
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ErrorEventPayload {
+    pub kind: String,
+    pub msg: String,
+}
+
+pub fn emit_error(app: &AppHandle, kind: &str, msg: &str) {
+    let _ = app.emit(
+        "capscr://error",
+        ErrorEventPayload {
+            kind: kind.to_string(),
+            msg: msg.to_string(),
+        },
+    );
+}
+
+#[tauri::command]
+pub fn set_autostart(app: AppHandle, enabled: bool, state: State<AppState>) -> Result<(), String> {
+    let manager = app.autolaunch();
+    if enabled {
+        manager.enable().map_err(|e| e.to_string())?;
+    } else {
+        manager.disable().map_err(|e| e.to_string())?;
+    }
+    let mut config = state.config.lock().unwrap();
+    config.ui.auto_start = enabled;
+    config.save().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_autostart(app: AppHandle) -> Result<bool, String> {
+    app.autolaunch().is_enabled().map_err(|e| e.to_string())
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct InstalledPlugin {
+    pub name: String,
+    pub version: String,
+    pub description: String,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct PluginManifest {
+    name: String,
+    #[serde(default)]
+    version: String,
+    #[serde(default)]
+    description: String,
+    #[serde(default = "default_true")]
+    enabled: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn plugins_dir() -> Result<PathBuf, String> {
+    let project = directories::ProjectDirs::from("com", "capscr", "capscr")
+        .ok_or_else(|| "cannot resolve plugins directory".to_string())?;
+    Ok(project.data_dir().to_path_buf().join("plugins"))
+}
+
+#[tauri::command]
+pub fn list_installed_plugins() -> Result<Vec<InstalledPlugin>, String> {
+    let dir = plugins_dir()?;
+    if !dir.exists() {
+        return Ok(Vec::new());
+    }
+    let mut out = Vec::new();
+    let entries = std::fs::read_dir(&dir).map_err(|e| e.to_string())?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let manifest_path = path.join("plugin.toml");
+        if !manifest_path.exists() {
+            continue;
+        }
+        let body = match std::fs::read_to_string(&manifest_path) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+        let manifest: PluginManifest = match toml::from_str(&body) {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::warn!("plugin {:?}: bad manifest: {e}", path.file_name());
+                continue;
+            }
+        };
+        out.push(InstalledPlugin {
+            name: manifest.name,
+            version: manifest.version,
+            description: manifest.description,
+            enabled: manifest.enabled,
+        });
+    }
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(out)
+}
+
+#[tauri::command]
+pub fn open_plugins_folder(app: AppHandle) -> Result<(), String> {
+    let dir = plugins_dir()?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    app.opener()
+        .open_path(dir.to_string_lossy().to_string(), None::<&str>)
+        .map_err(|e| e.to_string())
 }

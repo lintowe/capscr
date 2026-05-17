@@ -3,3 +3,5 @@
 /frontend/dist
 /gen/schemas
 /signing
+build.log
+build-*.log
