@@ -96,7 +96,26 @@ pub fn take_screenshot(
 ) -> Result<(), String> {
     let app_handle = app;
     std::thread::spawn(move || {
-        if let Err(e) = run_capture_pipeline(mode, post, &app_handle) {
+        // catch_unwind so a panic in any capture sub-step (D3D11, GIF encoder,
+        // image crate, plugin host) gets reported as a normal error instead
+        // of silently killing the worker thread with no user feedback.
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            run_capture_pipeline(mode, post, &app_handle)
+        }));
+        let outcome = match result {
+            Ok(r) => r,
+            Err(panic_info) => {
+                let msg = if let Some(s) = panic_info.downcast_ref::<&'static str>() {
+                    (*s).to_string()
+                } else if let Some(s) = panic_info.downcast_ref::<String>() {
+                    s.clone()
+                } else {
+                    "internal panic (no message)".to_string()
+                };
+                Err(anyhow::anyhow!("capture pipeline panicked: {msg}"))
+            }
+        };
+        if let Err(e) = outcome {
             tracing::warn!("capture failed: {e:#}");
             let friendly = humanize_capture_error(&e);
             emit_error(&app_handle, "capture", &friendly);
@@ -1090,6 +1109,11 @@ fn plugins_dir() -> Result<PathBuf, String> {
     let project = directories::ProjectDirs::from("com", "capscr", "capscr")
         .ok_or_else(|| "cannot resolve plugins directory".to_string())?;
     Ok(project.data_dir().to_path_buf().join("plugins"))
+}
+
+// Wrapper exported for setup-time pre-creation in main.rs.
+pub fn resolve_plugins_dir() -> Result<PathBuf, String> {
+    plugins_dir()
 }
 
 #[tauri::command]

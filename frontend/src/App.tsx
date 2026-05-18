@@ -65,6 +65,7 @@ function Hub() {
   const [updateInfo, setUpdateInfo] = createSignal<UpdateInfo | null>(null);
   const [updateDismissed, setUpdateDismissed] = createSignal(false);
   const [updating, setUpdating] = createSignal(false);
+  const [showShortcuts, setShowShortcuts] = createSignal(false);
 
   const win = getCurrentWindow();
   const active = () => tab().id;
@@ -155,10 +156,22 @@ function Hub() {
     }, 1000);
     unlisteners.push(() => clearInterval(tickHandle));
 
-    // Alt+S/T/H/D/M for tab switching — sidebar titles advertise these so
-    // the keybind has to actually work. We respect the dirty-state guard so
-    // Alt-jumping out of unsaved edits still prompts.
     const onKey = (ev: KeyboardEvent) => {
+      // F1 — toggle the shortcuts cheatsheet, no modifiers required.
+      if (ev.key === "F1" && !ev.ctrlKey && !ev.altKey && !ev.metaKey) {
+        ev.preventDefault();
+        setShowShortcuts((v) => !v);
+        return;
+      }
+      // Escape — close the cheatsheet if it's open.
+      if (ev.key === "Escape" && showShortcuts()) {
+        ev.preventDefault();
+        setShowShortcuts(false);
+        return;
+      }
+      // Alt+S/T/H/D/M for tab switching — sidebar titles advertise these so
+      // the keybind has to actually work. We respect the dirty-state guard so
+      // Alt-jumping out of unsaved edits still prompts.
       if (!ev.altKey || ev.ctrlKey || ev.metaKey || ev.shiftKey) return;
       const k = ev.key.toLowerCase();
       const target = TABS.find((t) => t.key === k);
@@ -275,6 +288,62 @@ function Hub() {
         </div>
       </aside>
 
+      <Show when={showShortcuts()}>
+        <div
+          class="shortcuts-overlay"
+          onClick={() => setShowShortcuts(false)}
+          role="dialog"
+          aria-label="keyboard shortcuts"
+        >
+          <div class="shortcuts-panel" onClick={(e) => e.stopPropagation()}>
+            <div class="shortcuts-head">
+              <span class="shortcuts-title">keyboard shortcuts</span>
+              <button
+                type="button"
+                class="icon-btn"
+                onClick={() => setShowShortcuts(false)}
+                aria-label="close"
+              >
+                <X size={12} stroke-width={1.5} />
+              </button>
+            </div>
+            <div class="shortcuts-body">
+              <div class="shortcuts-group">
+                <span class="shortcuts-group-label">hub</span>
+                <div class="shortcuts-row"><kbd>F1</kbd><span>toggle this overlay</span></div>
+                <div class="shortcuts-row"><kbd>Alt</kbd>+<kbd>S</kbd><span>settings tab</span></div>
+                <div class="shortcuts-row"><kbd>Alt</kbd>+<kbd>T</kbd><span>tasks tab</span></div>
+                <div class="shortcuts-row"><kbd>Alt</kbd>+<kbd>H</kbd><span>history tab</span></div>
+                <div class="shortcuts-row"><kbd>Alt</kbd>+<kbd>D</kbd><span>destinations tab</span></div>
+                <div class="shortcuts-row"><kbd>Alt</kbd>+<kbd>M</kbd><span>plugins tab</span></div>
+                <div class="shortcuts-row"><kbd>Esc</kbd><span>close overlay / hide hub</span></div>
+              </div>
+              <div class="shortcuts-group">
+                <span class="shortcuts-group-label">editor</span>
+                <div class="shortcuts-row"><kbd>1</kbd><span>arrow tool</span></div>
+                <div class="shortcuts-row"><kbd>2</kbd><span>rect tool</span></div>
+                <div class="shortcuts-row"><kbd>3</kbd><span>text tool</span></div>
+                <div class="shortcuts-row"><kbd>4</kbd><span>blur tool</span></div>
+                <div class="shortcuts-row"><kbd>Ctrl</kbd>+<kbd>Z</kbd><span>undo</span></div>
+                <div class="shortcuts-row"><kbd>Ctrl</kbd>+<kbd>Y</kbd><span>redo</span></div>
+                <div class="shortcuts-row"><kbd>Ctrl</kbd>+<kbd>V</kbd><span>paste image from clipboard</span></div>
+                <div class="shortcuts-row"><kbd>Ctrl</kbd>+<kbd>=</kbd>/<kbd>-</kbd><span>zoom in / out</span></div>
+                <div class="shortcuts-row"><kbd>Ctrl</kbd>+<kbd>0</kbd><span>zoom 100%</span></div>
+                <div class="shortcuts-row"><kbd>Ctrl</kbd>+wheel<span>zoom</span></div>
+              </div>
+              <div class="shortcuts-group">
+                <span class="shortcuts-group-label">global (default — rebindable in tasks)</span>
+                <div class="shortcuts-row"><kbd>Numpad 5</kbd><span>region screenshot → clipboard</span></div>
+                <div class="shortcuts-row"><kbd>Pause</kbd><span>region GIF → save</span></div>
+              </div>
+            </div>
+            <div class="shortcuts-foot">
+              <span class="muted">press <kbd>F1</kbd> or <kbd>Esc</kbd> to close</span>
+            </div>
+          </div>
+        </div>
+      </Show>
+
       <Show when={updateInfo() && !updateDismissed()}>
         <div class="update-banner">
           <span class="update-banner-glyph">▮</span>
@@ -353,6 +422,16 @@ function Hub() {
           </span>
         </Show>
         <span class="grow" />
+        <button
+          type="button"
+          class="seg seg-btn"
+          onClick={() => setShowShortcuts(true)}
+          title="keyboard shortcuts"
+        >
+          <span class="seg-k">help</span>
+          <span class="seg-v">F1</span>
+        </button>
+        <span class="seg-sep">│</span>
         <span class="seg tail">
           <span class="seg-k">capscr</span>
           <span class="seg-v">v{__APP_VERSION__}</span>
