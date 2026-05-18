@@ -997,6 +997,81 @@ button.btn,
   line-height: 1.4;
 }
 
+.history-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+
+.history-search {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--rule);
+  padding: 4px 8px;
+  min-width: 220px;
+  background: var(--ink-1);
+  color: var(--mute);
+}
+
+.history-search input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  color: var(--text-1);
+  font-family: inherit;
+  font-size: 11px;
+  outline: none;
+  min-width: 0;
+}
+
+.history-search input::placeholder {
+  color: var(--mute);
+}
+
+.search-clear {
+  background: transparent;
+  border: none;
+  color: var(--mute);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  padding: 0;
+}
+
+.search-clear:hover {
+  color: var(--text-1);
+}
+
+.history-filters {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.filter-pill {
+  background: transparent;
+  border: 1px solid var(--rule);
+  color: var(--mute);
+  padding: 3px 8px;
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+}
+
+.filter-pill:hover {
+  color: var(--text-2);
+  border-color: var(--rule-2);
+}
+
+.filter-pill.is-active {
+  color: var(--text-1);
+  border-color: var(--text-2);
+}
+
 .tile-actions {
   position: absolute;
   inset: 0 0 auto 0;

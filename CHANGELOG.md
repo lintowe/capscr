@@ -12,6 +12,7 @@ nothing pending. drop ideas in github issues.
 - **numbered step pins in the editor** — new `[5]` tool drops auto-incrementing numbered circles (1, 2, 3, ...) at click points. ideal for annotating tutorials / bug repros. size slider 8–48 px; uses the active color. undo / redo work the same as every other op, and the next number is re-derived from existing pins so removing #3 makes the next click drop a #3 again.
 - **three more annotation tools** in the editor — `[6]` line (straight stroke, no arrowhead), `[7]` ellipse (circular emphasis), `[8]` highlighter (semi-transparent multiply-blend marker, 4× stroke). brings parity with sharex's annotation set.
 - **HDR badge in History** — tiles whose capture has a `<stem>.hdr.png` sidecar show an `HDR` tag next to the size / date line. raw `.hdr.png` sidecars are now hidden from the History grid (they were polluting it as duplicate-looking PNGs).
+- **History filename search + type filter** — substring-match input plus `all / images / gifs / hdr` pill row. the lede flips to `N of M files match` when filtered. minimal CSS — keeps the diagnostic-console aesthetic.
 - **`capscr --version` / `--help` (also `-V` / `-h`)** — invoking capscr.exe from PowerShell with these flags now prints the line and exits cleanly. uses `AttachConsole(ATTACH_PARENT_PROCESS)` so output lands in the invoking shell instead of being lost to the windows subsystem.
 
 ### changed
