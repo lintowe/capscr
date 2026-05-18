@@ -168,7 +168,7 @@ export function Editor() {
         break;
       case "text":
         ctx.fillStyle = op.color;
-        ctx.font = `${op.fontSize}px "Departure Mono", monospace`;
+        ctx.font = `${op.fontSize}px "Fira Code", "Hack", ui-monospace, monospace`;
         ctx.textBaseline = "top";
         // black shadow for legibility
         ctx.shadowColor = "rgba(0,0,0,0.85)";
