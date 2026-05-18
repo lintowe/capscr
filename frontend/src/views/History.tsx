@@ -1,4 +1,4 @@
-import { createResource, createSignal, For, Show } from "solid-js";
+import { createMemo, createResource, createSignal, For, Show } from "solid-js";
 import {
   Copy,
   RefreshCw,
@@ -6,8 +6,12 @@ import {
   Trash2,
   Edit3,
   UploadCloud,
+  Search,
+  X,
 } from "lucide-solid";
 import { api } from "../api";
+
+type FilterKind = "all" | "images" | "gifs" | "hdr";
 
 function formatBytes(b: number): string {
   if (b < 1024) return `${b} B`;
@@ -30,6 +34,21 @@ export function History() {
   // Track which path is in the "confirm delete" state. Second click on the
   // trash icon within 4s commits; otherwise the prompt resets.
   const [confirmDelete, setConfirmDelete] = createSignal<string | null>(null);
+  const [search, setSearch] = createSignal("");
+  const [filter, setFilter] = createSignal<FilterKind>("all");
+
+  const filtered = createMemo(() => {
+    const list = entries() ?? [];
+    const needle = search().trim().toLowerCase();
+    const kind = filter();
+    return list.filter((e) => {
+      if (kind === "gifs" && !e.is_gif) return false;
+      if (kind === "images" && e.is_gif) return false;
+      if (kind === "hdr" && !e.has_hdr) return false;
+      if (needle && !e.filename.toLowerCase().includes(needle)) return false;
+      return true;
+    });
+  });
 
   const armDelete = (path: string) => {
     setConfirmDelete(path);
@@ -52,11 +71,52 @@ export function History() {
         <span class="lede">
           {entries.loading
             ? "reading dir..."
-            : `${entries()?.length ?? 0} files in output dir`}
+            : (() => {
+                const total = entries()?.length ?? 0;
+                const shown = filtered().length;
+                return shown === total
+                  ? `${total} files in output dir`
+                  : `${shown} of ${total} files match`;
+              })()}
         </span>
       </div>
 
-      <div class="row between" style="margin-bottom: 18px;">
+      <div class="row between" style="margin-bottom: 18px; gap: 10px;">
+        <div class="history-controls">
+          <label class="history-search">
+            <Search size={11} stroke-width={1.5} />
+            <input
+              type="text"
+              placeholder="filter by filename..."
+              value={search()}
+              onInput={(e) => setSearch(e.currentTarget.value)}
+            />
+            <Show when={search()}>
+              <button
+                type="button"
+                class="search-clear"
+                title="clear"
+                onClick={() => setSearch("")}
+              >
+                <X size={10} stroke-width={1.5} />
+              </button>
+            </Show>
+          </label>
+          <div class="history-filters">
+            <For each={["all", "images", "gifs", "hdr"] as const}>
+              {(k) => (
+                <button
+                  type="button"
+                  class="filter-pill"
+                  classList={{ "is-active": filter() === k }}
+                  onClick={() => setFilter(k)}
+                >
+                  {k}
+                </button>
+              )}
+            </For>
+          </div>
+        </div>
         <button class="btn" data-variant="ghost" onClick={() => refetch()}>
           <RefreshCw size={12} stroke-width={1.5} />
           reload
@@ -89,8 +149,18 @@ export function History() {
           </Show>
         }
       >
+        <Show
+          when={filtered().length > 0}
+          fallback={
+            <div class="empty">
+              <span class="stick" />
+              no matches
+              <p>nothing in the output dir matches your filter.</p>
+            </div>
+          }
+        >
         <div class="tiles">
-          <For each={entries()}>
+          <For each={filtered()}>
             {(e) => (
               <div
                 class="tile"
@@ -179,6 +249,7 @@ export function History() {
             )}
           </For>
         </div>
+        </Show>
       </Show>
     </>
   );
