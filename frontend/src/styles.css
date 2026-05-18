@@ -1,13 +1,7 @@
 /* capscr — instrument greyscale.
-   one face. lowercase. roman numerals. no rounded corners. */
-
-@font-face {
-  font-family: "Departure Mono";
-  font-style: normal;
-  font-weight: 400;
-  font-display: block;
-  src: url("./assets/fonts/DepartureMono-Regular.woff2") format("woff2");
-}
+   lowercase. roman numerals. no rounded corners.
+   Type stack mirrors opencode's approach: no bundled face, lean on
+   whatever the user already has tuned for their terminal/editor. */
 
 :root {
   /* hard greyscale ladder — user requested literal black ↔ white */
@@ -31,9 +25,11 @@
   --bg-status: var(--ink-0);
   --bg-surface: var(--ink-3);
 
-  /* single face, by design */
-  --font: "Departure Mono", ui-monospace, "Cascadia Mono",
-    "Source Code Pro", monospace;
+  /* No bundled face. Prefer Fira Code / Hack if the user has them
+     (every "I care about my code font" dev does), otherwise fall back
+     through the platform-native mono chain. */
+  --font: "Fira Code", "Hack", ui-monospace, "Cascadia Mono", Menlo,
+    Consolas, "Liberation Mono", "Courier New", monospace;
 
   /* hierarchy via tracking, not weight */
   --tracked: 0.06em;
@@ -65,7 +61,9 @@ body,
   line-height: 1.45;
   -webkit-font-smoothing: antialiased;
   text-rendering: geometricPrecision;
-  /* Departure Mono is a pixel face — keep crispness */
+  /* Ligatures look off in UI chrome regardless of which mono face
+     resolves first; keep them off there. (Code/data display still
+     opts in via inherited contexts that don't reset this.) */
   font-variant-ligatures: none;
 }
 

@@ -16,3 +16,5 @@ build-*.log
 !/icons/icon.ico
 !/icons/icon.png
 !/icons/icon.icns
+!/icons/installer-header.bmp
+!/icons/installer-sidebar.bmp
