@@ -108,6 +108,12 @@ fn main() {
                     tracing::warn!("asset scope allow_directory({:?}) failed: {e}", dir);
                 }
             }
+            // Pre-create the plugins folder so 'Open folder' from the
+            // Marketplace tab succeeds on a fresh install without round-
+            // tripping through the open_plugins_folder fallback create.
+            if let Ok(dirs) = commands::resolve_plugins_dir() {
+                let _ = std::fs::create_dir_all(&dirs);
+            }
             let (tx, rx) = cb::unbounded::<HotkeyCommand>();
             {
                 let st = app.state::<state::AppState>();
