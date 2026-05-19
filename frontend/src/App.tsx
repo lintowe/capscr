@@ -333,7 +333,7 @@ function Hub() {
               </div>
               <div class="shortcuts-group">
                 <span class="shortcuts-group-label">global (default — rebindable in tasks)</span>
-                <div class="shortcuts-row"><kbd>PrintScreen</kbd><span>region screenshot → clipboard</span></div>
+                <div class="shortcuts-row"><kbd>PrintScreen</kbd><span>region screenshot → save + clipboard</span></div>
                 <div class="shortcuts-row"><kbd>Ctrl+Shift+G</kbd><span>region GIF → save</span></div>
               </div>
             </div>
