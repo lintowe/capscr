@@ -241,7 +241,13 @@ impl Default for HdrConfig {
     fn default() -> Self {
         Self {
             mode: HdrCompressionMode::MapCllToDisplay,
-            brightness_nits: 80.0,
+            // 0.0 is the sentinel for "auto — use the display's SDR white
+            // level reported by DXGI". The previous default of 80 was a
+            // hardcoded value that ignored the display, which made HDR
+            // tonemap output too bright on displays with high SDR white
+            // sliders (300+ nits) because effective_params() only auto-fills
+            // when the param is <= 0.0.
+            brightness_nits: 0.0,
             user_brightness_scale: 1.0,
             use_p99_max_cll: true,
         }
@@ -609,10 +615,12 @@ impl Config {
             ));
         }
         if !self.capture.hdr.brightness_nits.is_finite()
-            || self.capture.hdr.brightness_nits < 1.0
+            || self.capture.hdr.brightness_nits < 0.0
             || self.capture.hdr.brightness_nits > 10000.0
         {
-            return Err(anyhow!("hdr.brightness_nits must be between 1 and 10000"));
+            return Err(anyhow!(
+                "hdr.brightness_nits must be 0 (auto-detect) or between 1 and 10000"
+            ));
         }
         if !self.capture.hdr.user_brightness_scale.is_finite()
             || self.capture.hdr.user_brightness_scale <= 0.0

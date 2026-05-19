@@ -80,6 +80,12 @@ fn main() {
     }
     install_hdr_runtime_from_config(&config);
 
+    // Pre-warm the Win32 audio subsystem in the background so the first
+    // capture cue isn't delayed by waveOut initialisation. Fire-and-forget;
+    // the actual user-triggered Sound::play won't race because it serialises
+    // through PlaySoundW.
+    std::thread::spawn(sound::warm_audio_subsystem);
+
     let initial_tasks = config.capture_tasks.clone();
     let app_state = state::AppState::new(config);
 

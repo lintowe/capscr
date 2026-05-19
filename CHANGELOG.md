@@ -6,6 +6,14 @@ format follows [keep-a-changelog](https://keepachangelog.com/en/1.1.0/) loosely.
 
 nothing pending. drop ideas in github issues.
 
+## [0.3.32] — 2026-05-19
+
+Driven by user testing feedback. Two real bugs that made the prior build feel "not ready to ship as a daily-driver":
+
+### fixed
+- **first capture sound was delayed 200–500 ms** — Win32 audio subsystem (waveOut) initialises lazily on first PlaySoundW. `sound::warm_audio_subsystem()` now fires in a background thread at startup via `PlaySoundW(null, SND_PURGE)`, so the first real screenshot beep is instant.
+- **HDR tonemap target ignored the display's actual SDR white level** — default `hdr.brightness_nits` was 80, but `effective_params()` only auto-fills from the display when the value is ≤ 0. So on a display with the SDR slider at 300 nits, the tonemap was still targeting 80 nits, producing washed-out / clipped highlights on HDR captures. Default is now `0.0` (the documented "auto" sentinel); user-set explicit values still override. Validation now accepts 0.
+
 ## [0.3.31] — 2026-05-19
 
 ### added
@@ -36,6 +44,7 @@ nothing pending. drop ideas in github issues.
 - **History live-refreshes on capture** — new `capscr://capture-saved` event fires from the save path (including the OpenEditor and GIF-save branches). History.tsx subscribes and refetches with a 250ms coalesce so a rapid burst (e.g. PNG + HDR sidecar landing back-to-back) only triggers one re-read. No more hitting "reload" after every screenshot.
 - **editor dirty-state guard** — Escape and the titlebar X button now warn before discarding unsaved annotations. Same pattern the Settings tab already uses. Closes a real data-loss footgun: drawing 10 arrows then Esc-ing out used to silently throw them all away.
 - **`save_edited_image` writes atomically** — was overwriting the target in-place; a disk-full or permission-denied mid-write would truncate the original and lose the un-edited capture too. Now stages to `.<basename>.editing.tmp` and atomically renames, with cleanup on either failure path. Also fires `capscr://capture-saved` so the History tile picks up the new mtime.
+- **hub re-opens instantly after closing** — was paying multi-second cold-boot every time the user closed and re-opened the hub (the startup prewarm only helped the very first click). Close-requested is now intercepted and the window is hidden instead, keeping the WebView2 process alive. Idle cost: ~20 MB. Next tray-click is instant.
 - silence a clippy `duplicated attribute` warning on `src/jumplist.rs` — the module is already gated `#[cfg(windows)]` at the use-site, so the inner `#![cfg(windows)]` was redundant.
 
 ## [0.3.30] — 2026-05-19
