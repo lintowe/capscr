@@ -566,6 +566,14 @@ pub fn delete_capture(path: String, state: State<AppState>) -> Result<(), String
     if !canonical.starts_with(&dir_canonical) {
         return Err("Path is outside the configured output directory".into());
     }
+    // Also remove the `<stem>.hdr.png` sidecar if present, so deleting a
+    // capture from History doesn't leave orphan HDR data on disk.
+    if let Some(stem) = canonical.file_stem().and_then(|s| s.to_str()) {
+        let sidecar = canonical.with_file_name(format!("{stem}.hdr.png"));
+        if sidecar.exists() && sidecar != canonical {
+            let _ = std::fs::remove_file(&sidecar);
+        }
+    }
     std::fs::remove_file(&canonical).map_err(|e| e.to_string())
 }
 
