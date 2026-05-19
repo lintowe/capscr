@@ -374,7 +374,7 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
                 "settings" => {
                     let _ = commands::open_hub_window(app);
                 }
-                "exit" => app.exit(0),
+                "exit" => commands::exit_app(app.clone()),
                 _ => {}
             }
         })
