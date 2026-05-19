@@ -47,3 +47,19 @@ impl Sound {
         // audio cues are windows-only at 0.3.1; non-windows builds are silent.
     }
 }
+
+/// Warm up the Windows audio subsystem so the first real `Sound::play` cue
+/// doesn't have a 200-500 ms startup lag (the user reported the first
+/// screenshot beep being noticeably late). PlaySoundW with SND_PURGE and a
+/// null pointer kicks waveOut initialisation without actually emitting
+/// audio. Cheap, idempotent, no-op on non-Windows.
+pub fn warm_audio_subsystem() {
+    #[cfg(windows)]
+    {
+        use windows::core::PCWSTR;
+        use windows::Win32::Media::Audio::{PlaySoundW, SND_NODEFAULT, SND_PURGE};
+        unsafe {
+            let _ = PlaySoundW(PCWSTR::null(), None, SND_PURGE | SND_NODEFAULT);
+        }
+    }
+}

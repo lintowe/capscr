@@ -783,7 +783,7 @@ pub fn prewarm_hub_window(app: &tauri::App) -> tauri::Result<()> {
         return Ok(());
     }
     let url = tauri::WebviewUrl::App("index.html".into());
-    tauri::WebviewWindowBuilder::new(app, HUB_LABEL, url)
+    let window = tauri::WebviewWindowBuilder::new(app, HUB_LABEL, url)
         .title("capscr")
         .inner_size(900.0, 640.0)
         .min_inner_size(720.0, 480.0)
@@ -791,17 +791,31 @@ pub fn prewarm_hub_window(app: &tauri::App) -> tauri::Result<()> {
         .decorations(false)
         .visible(false)
         .build()?;
+    // Intercept the close button so the WebView2 process stays alive for the
+    // next tray-click. Without this we pay multi-second cold-boot every time
+    // the user closes and re-opens the hub, even after the startup prewarm.
+    intercept_hub_close(window);
     Ok(())
+}
+
+fn intercept_hub_close(window: tauri::WebviewWindow) {
+    window.clone().on_window_event(move |event| {
+        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+            api.prevent_close();
+            let _ = window.hide();
+        }
+    });
 }
 
 pub fn open_hub_window(app: &AppHandle) -> tauri::Result<()> {
     if let Some(window) = app.get_webview_window(HUB_LABEL) {
         let _ = window.show();
+        let _ = window.unminimize();
         let _ = window.set_focus();
         return Ok(());
     }
     let url = tauri::WebviewUrl::App("index.html".into());
-    tauri::WebviewWindowBuilder::new(app, HUB_LABEL, url)
+    let window = tauri::WebviewWindowBuilder::new(app, HUB_LABEL, url)
         .title("capscr")
         .inner_size(900.0, 640.0)
         .min_inner_size(720.0, 480.0)
@@ -809,6 +823,7 @@ pub fn open_hub_window(app: &AppHandle) -> tauri::Result<()> {
         .decorations(false)
         .visible(true)
         .build()?;
+    intercept_hub_close(window);
     Ok(())
 }
 
