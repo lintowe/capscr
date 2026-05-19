@@ -277,6 +277,28 @@ function CapturePane(props: { c: AppConfig; patch: Patch }) {
         </div>
       </Section>
 
+      <Section title="timing">
+        <div class="field">
+          <label class="field-label">pre-capture delay</label>
+          <div class="field-control">
+            <input
+              type="number"
+              min={0}
+              max={5000}
+              step={100}
+              value={c().capture.delay_ms}
+              onInput={(e) =>
+                props.patch("capture", {
+                  ...c().capture,
+                  delay_ms: parseInt(e.currentTarget.value || "0"),
+                })
+              }
+            />
+            <span class="field-hint">ms before grabbing pixels — useful for tooltips / menus (0 = instant)</span>
+          </div>
+        </div>
+      </Section>
+
       <Section title="gif recording">
         <div class="field">
           <label class="field-label">frame rate</label>

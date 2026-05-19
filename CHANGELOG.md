@@ -6,6 +6,12 @@ format follows [keep-a-changelog](https://keepachangelog.com/en/1.1.0/) loosely.
 
 nothing pending. drop ideas in github issues.
 
+## [0.3.34] — 2026-05-19
+
+### added
+- **ftp destination in settings ui** — the ftp upload backend has been wired since 0.3.31 but had no ui. destinations tab now shows an ftp/ftps option with fields for host, port, username, password, remote directory, explicit-tls toggle, and a public-url template (`{filename}` placeholder).
+- **pre-capture delay setting** — capture → timing pane exposes `capture.delay_ms` (0–5000 ms, step 100). the backend already honored this config value; now users can set it without hand-editing `config.toml`. useful for capturing tooltips or context menus that need a moment to appear.
+
 ## [0.3.33] — 2026-05-19
 
 ### changed
