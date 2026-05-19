@@ -745,6 +745,15 @@ pub fn reupload_capture(
     if !canonical.starts_with(&dir_canonical) {
         return Err("Path is outside the configured output directory".into());
     }
+    // GIF files contain animation data that image::open drops to the first frame.
+    // Upload the raw file bytes via a dedicated path instead of re-encoding.
+    let ext = canonical.extension()
+        .and_then(|e| e.to_str())
+        .map(|s| s.to_lowercase())
+        .unwrap_or_default();
+    if ext == "gif" {
+        return Err("GIF reupload is not yet supported — open the file manually and upload it from there".into());
+    }
     let img = image::open(&canonical).map_err(|e| e.to_string())?;
     let rgba = img.to_rgba8();
     let uploader = crate::upload::shared_uploader().map_err(|e| e.to_string())?;

@@ -135,6 +135,9 @@ export function Editor() {
   const [textBuffer, setTextBuffer] = createSignal("");
   const [busy, setBusy] = createSignal<"save" | "copy" | "upload" | null>(null);
   const [status, setStatus] = createSignal<{ tone: string; msg: string } | null>(null);
+  // tracks whether a paste replaced the canvas — paste doesn't add to ops[]
+  // so isDirty() would otherwise return false, silently discarding the paste
+  const [hasPastedContent, setHasPastedContent] = createSignal(false);
   const [isHdrSource, setIsHdrSource] = createSignal(false);
   const [hdrSidecarPath, setHdrSidecarPath] = createSignal<string | null>(null);
 
@@ -148,6 +151,7 @@ export function Editor() {
     setOps([]);
     setRedoStack([]);
     setDraft(null);
+    setHasPastedContent(false);
     baseImage = null;
     setIsHdrSource(false);
     setHdrSidecarPath(null);
@@ -291,6 +295,7 @@ export function Editor() {
         canvasRef.height = img.naturalHeight;
         setOps([]);
         setRedoStack([]);
+        setHasPastedContent(true);
         setLoaded(true);
         setStatus({
           tone: "ok",
@@ -309,16 +314,17 @@ export function Editor() {
   // Truthy when there's at least one committed edit (or a draft mid-drag).
   // Used by the dirty-state guard so Escape / the close button warn before
   // throwing away the user's work.
-  const isDirty = () => ops().length > 0 || draft() !== null;
+  const isDirty = () => ops().length > 0 || draft() !== null || hasPastedContent();
 
   const confirmCloseEditor = async () => {
     if (!isDirty()) {
       void win.close();
       return;
     }
-    const ok = window.confirm(
-      "Discard unsaved annotations? They aren't written back to disk until you press Save.",
-    );
+    const msg = hasPastedContent()
+      ? "Discard pasted image and unsaved annotations? Changes aren't written to disk until you press Save."
+      : "Discard unsaved annotations? They aren't written back to disk until you press Save.";
+    const ok = window.confirm(msg);
     if (ok) {
       void win.close();
     }
@@ -340,9 +346,10 @@ export function Editor() {
   onMount(async () => {
     closeUnlisten = await win.onCloseRequested(async (ev) => {
       if (!isDirty()) return;
-      const ok = window.confirm(
-        "Discard unsaved annotations? They aren't written back to disk until you press Save.",
-      );
+      const msg = hasPastedContent()
+        ? "Discard pasted image and unsaved annotations? Changes aren't written to disk until you press Save."
+        : "Discard unsaved annotations? They aren't written back to disk until you press Save.";
+      const ok = window.confirm(msg);
       if (!ok) ev.preventDefault();
     });
   });
@@ -718,6 +725,8 @@ export function Editor() {
         bytes: Array.from(bytes),
         targetPath: path,
       });
+      setOps([]);
+      setHasPastedContent(false);
       setStatus({ tone: "ok", msg: "saved." });
       setTimeout(() => void win.close(), 400);
     } catch (e) {
