@@ -244,12 +244,45 @@ impl ImageUploader {
         if data.len() > MAX_UPLOAD_SIZE {
             return Err(anyhow!("Upload too large ({} bytes)", data.len()));
         }
-        match service {
-            UploadService::Imgur => self.upload_imgur(data, mime, file_name, "546c25a59c58ad7"),
-            UploadService::ImgurWithClientId(cid) => self.upload_imgur(data, mime, file_name, cid),
-            UploadService::Custom(config) => self.upload_custom(data, mime, file_name, config),
-            UploadService::Ftp(target) => upload_ftp(data, file_name, target),
+        // Retry transient network failures up to 3 times with exponential
+        // backoff (300ms, 600ms). HTTP-status errors and parser errors are
+        // NOT retried — those indicate a real problem at the destination,
+        // not a flaky link.
+        let attempts = 3u32;
+        let mut delay_ms = 300u64;
+        let mut last_err: Option<anyhow::Error> = None;
+        for attempt in 0..attempts {
+            let result = match service {
+                UploadService::Imgur => {
+                    self.upload_imgur(data, mime, file_name, "546c25a59c58ad7")
+                }
+                UploadService::ImgurWithClientId(cid) => {
+                    self.upload_imgur(data, mime, file_name, cid)
+                }
+                UploadService::Custom(config) => {
+                    self.upload_custom(data, mime, file_name, config)
+                }
+                UploadService::Ftp(target) => upload_ftp(data, file_name, target),
+            };
+            match result {
+                Ok(r) => return Ok(r),
+                Err(e) => {
+                    let transient = is_transient_upload_error(&e);
+                    if !transient || attempt + 1 == attempts {
+                        return Err(e);
+                    }
+                    tracing::info!(
+                        "upload attempt {} failed transiently ({e}); retrying in {}ms",
+                        attempt + 1,
+                        delay_ms
+                    );
+                    last_err = Some(e);
+                    std::thread::sleep(Duration::from_millis(delay_ms));
+                    delay_ms = delay_ms.saturating_mul(2);
+                }
+            }
         }
+        Err(last_err.unwrap_or_else(|| anyhow!("upload failed after retries")))
     }
 
     fn encode_png(&self, image: &RgbaImage) -> Result<Vec<u8>> {
@@ -587,6 +620,32 @@ pub(crate) fn validate_resolved_host(host: &str, port: u16) -> Result<()> {
     Ok(())
 }
 
+// Classify whether an upload error is worth retrying. We retry on
+// timeouts, connection resets, dropped DNS, and 5xx-shaped server errors —
+// not on auth failures or 4xx (retrying those would just hammer a server
+// telling us "no"). Heuristic matches against the anyhow chain text, so we
+// don't have to thread reqwest::Error types through every layer.
+fn is_transient_upload_error(e: &anyhow::Error) -> bool {
+    let text = format!("{:#}", e).to_lowercase();
+    let transient_markers = [
+        "timed out",
+        "timeout",
+        "connection reset",
+        "connection refused",
+        "broken pipe",
+        "tls handshake",
+        "name resolution",
+        "name or service not known",
+        "temporary failure",
+        "server misbehaving",
+        "stream closed",
+        "502",
+        "503",
+        "504",
+    ];
+    transient_markers.iter().any(|m| text.contains(m))
+}
+
 pub fn upload_ftp(data: &[u8], file_name: &str, target: &FtpTarget) -> Result<UploadResult> {
     use std::io::Cursor;
     use suppaftp::FtpStream;
@@ -701,6 +760,21 @@ fn uniquify_remote_filename(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn transient_classifier_retries_network_failures() {
+        assert!(is_transient_upload_error(&anyhow!("operation timed out")));
+        assert!(is_transient_upload_error(&anyhow!("connection reset by peer")));
+        assert!(is_transient_upload_error(&anyhow!("status code: 503")));
+        assert!(is_transient_upload_error(&anyhow!("tls handshake failed")));
+    }
+
+    #[test]
+    fn transient_classifier_skips_real_failures() {
+        assert!(!is_transient_upload_error(&anyhow!("401 unauthorized")));
+        assert!(!is_transient_upload_error(&anyhow!("imgur error: Image too big")));
+        assert!(!is_transient_upload_error(&anyhow!("invalid JSON in response")));
+    }
 
     #[test]
     fn test_extract_json_url() {

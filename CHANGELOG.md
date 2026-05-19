@@ -26,6 +26,9 @@ nothing pending. drop ideas in github issues.
 - **hung capture accumulated worker threads** — mashing a capture hotkey while a previous capture was stuck on a held D3D11 device created one stalled thread per press. Added an atomic in-flight gate in `run_capture_pipeline` that drops new triggers until the previous one returns (or unwinds).
 - **first-run silent failure when the captures folder is unreachable** — if `%PICTURE%/capscr` couldn't be created at startup (network drive, permission denied), captures failed later with no indication why. Now an OS notification fires at startup pointing the user at Settings → Output.
 - **"Capture saved + copied" was lying when the clipboard was busy** — the clipboard step's error was being swallowed. The notification now says "Capture saved (clipboard busy)" if the clipboard write actually failed.
+- **deleting a capture from History orphaned its HDR sidecar** — `delete_capture` only removed the SDR file, leaving `<stem>.hdr.png` on disk. Now removes both atomically (best-effort on the sidecar).
+- **DXGI staging texture stayed mapped if `Vec::with_capacity` OOM'd** — the manual `Unmap` calls had to be repeated at every error path. Replaced with a `MapGuard` Drop struct so the unmap is unconditional, even on panic.
+- **uploads didn't retry transient network failures** — a flaky link / 5xx burp during an imgur upload returned an error immediately. Now retries 3 times with 300ms → 600ms backoff, but only for transient markers (timeout, connection reset, 502/503/504, TLS handshake, DNS, etc) — never for auth errors or response-shape errors. New tests `transient_classifier_retries_network_failures` and `transient_classifier_skips_real_failures` lock the policy.
 - silence a clippy `duplicated attribute` warning on `src/jumplist.rs` — the module is already gated `#[cfg(windows)]` at the use-site, so the inner `#![cfg(windows)]` was redundant.
 
 ## [0.3.30] — 2026-05-19

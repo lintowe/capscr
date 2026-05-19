@@ -437,34 +437,44 @@ mod windows_hdr {
             let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
             context.Map(&staging_texture, 0, D3D11_MAP_READ, 0, Some(&mut mapped))?;
 
+            // Guard pattern: every Map call needs a matching Unmap, even on
+            // panic or early return. Without this an OOM on Vec::with_capacity
+            // below could leave the staging texture locked and any subsequent
+            // capture would fail until capscr restarted.
+            struct MapGuard<'a> {
+                context: &'a ID3D11DeviceContext,
+                texture: &'a ID3D11Texture2D,
+            }
+            impl<'a> Drop for MapGuard<'a> {
+                fn drop(&mut self) {
+                    unsafe { self.context.Unmap(self.texture, 0) };
+                }
+            }
+            let _map_guard = MapGuard { context: &context, texture: &staging_texture };
+
             let row_pitch = mapped.RowPitch as usize;
             if row_pitch < row_bytes {
-                context.Unmap(&staging_texture, 0);
                 return Err(anyhow!("Invalid row pitch from GPU"));
             }
 
             let src_ptr = mapped.pData as *const u8;
             if src_ptr.is_null() {
-                context.Unmap(&staging_texture, 0);
                 return Err(anyhow!("Null pointer from GPU mapping"));
             }
 
             let mut data = Vec::with_capacity(total_bytes);
 
             for y in 0..height {
-                let row_offset = (y as usize).checked_mul(row_pitch)
-                    .ok_or_else(|| {
-                        context.Unmap(&staging_texture, 0);
-                        anyhow!("Row offset overflow")
-                    })?;
+                let row_offset = (y as usize)
+                    .checked_mul(row_pitch)
+                    .ok_or_else(|| anyhow!("Row offset overflow"))?;
 
                 let row_start = src_ptr.add(row_offset);
                 let row_slice = std::slice::from_raw_parts(row_start, row_bytes);
                 data.extend_from_slice(row_slice);
             }
 
-            context.Unmap(&staging_texture, 0);
-
+            // _map_guard drops here, invoking Unmap
             Ok((data, width, height, hdr_format))
         }
     }
