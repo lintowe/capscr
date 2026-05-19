@@ -1407,6 +1407,7 @@ pub fn get_autostart(app: AppHandle) -> Result<bool, String> {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct InstalledPlugin {
+    pub id: String,
     pub name: String,
     pub version: String,
     pub description: String,
@@ -1468,6 +1469,7 @@ pub fn list_installed_plugins() -> Result<Vec<InstalledPlugin>, String> {
             }
         };
         out.push(InstalledPlugin {
+            id: entry.file_name().to_string_lossy().to_string(),
             name: manifest.name,
             version: manifest.version,
             description: manifest.description,
@@ -1521,4 +1523,26 @@ pub async fn marketplace_install(id: String, state: State<'_, AppState>) -> Resu
 pub fn marketplace_uninstall(id: String) -> Result<(), String> {
     let plugins = plugins_dir()?;
     crate::marketplace::uninstall_plugin(&plugins, &id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn toggle_plugin_enabled(id: String, enabled: bool) -> Result<(), String> {
+    crate::marketplace::validate_id(&id).map_err(|e| e.to_string())?;
+    let plugins = plugins_dir()?;
+    let plugin_dir = plugins.join(&id);
+    if !plugin_dir.is_dir() {
+        return Err(format!("plugin '{}' not found", id));
+    }
+    let canonical_plugin = std::fs::canonicalize(&plugin_dir).map_err(|e| e.to_string())?;
+    let canonical_plugins = std::fs::canonicalize(&plugins).map_err(|e| e.to_string())?;
+    if !canonical_plugin.starts_with(&canonical_plugins) {
+        return Err("plugin path escapes plugins dir".to_string());
+    }
+    let manifest_path = canonical_plugin.join("plugin.toml");
+    let body = std::fs::read_to_string(&manifest_path).map_err(|e| e.to_string())?;
+    let mut table: toml::Table = toml::from_str(&body).map_err(|e| e.to_string())?;
+    table.insert("enabled".to_string(), toml::Value::Boolean(enabled));
+    let new_body = toml::to_string(&table).map_err(|e| e.to_string())?;
+    std::fs::write(&manifest_path, new_body).map_err(|e| e.to_string())?;
+    Ok(())
 }

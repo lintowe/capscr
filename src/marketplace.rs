@@ -47,6 +47,7 @@ const MAX_REGISTRY_BYTES: usize = 2 * 1024 * 1024; // 2 MB — generous for a fe
 const MAX_PLUGIN_ZIP_BYTES: u64 = 50 * 1024 * 1024; // 50 MB
 const MAX_PLUGIN_FILES: usize = 256;
 const MAX_PLUGIN_FILE_BYTES: u64 = 16 * 1024 * 1024; // per-file cap inside the zip
+const MAX_PLUGIN_TOTAL_BYTES: u64 = 200 * 1024 * 1024; // total extracted cap
 const REGISTRY_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -184,6 +185,8 @@ pub fn install_plugin(plugins_dir: &Path, entry: &RegistryEntry) -> Result<()> {
         );
     }
 
+    let mut total_extracted: u64 = 0;
+
     for i in 0..archive.len() {
         let mut file = archive.by_index(i)?;
         let raw_name = match file.enclosed_name() {
@@ -208,12 +211,21 @@ pub fn install_plugin(plugins_dir: &Path, entry: &RegistryEntry) -> Result<()> {
             std::fs::create_dir_all(&out_path)?;
             continue;
         }
-        if file.size() > MAX_PLUGIN_FILE_BYTES {
+        let file_size = file.size();
+        if file_size > MAX_PLUGIN_FILE_BYTES {
             let _ = std::fs::remove_dir_all(&staging);
             bail!(
                 "zip entry too large: {:?} ({} bytes)",
                 raw_name,
-                file.size()
+                file_size
+            );
+        }
+        total_extracted += file_size;
+        if total_extracted > MAX_PLUGIN_TOTAL_BYTES {
+            let _ = std::fs::remove_dir_all(&staging);
+            bail!(
+                "plugin zip total extracted size exceeds cap ({} bytes)",
+                MAX_PLUGIN_TOTAL_BYTES
             );
         }
         if let Some(parent) = out_path.parent() {
@@ -252,7 +264,7 @@ pub fn uninstall_plugin(plugins_dir: &Path, id: &str) -> Result<()> {
     Ok(())
 }
 
-fn validate_id(id: &str) -> Result<()> {
+pub fn validate_id(id: &str) -> Result<()> {
     if id.is_empty() || id.len() > 64 {
         return Err(anyhow!("invalid plugin id length: {}", id.len()));
     }

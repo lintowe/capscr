@@ -220,7 +220,16 @@ mod windows_impl {
 
             let instance = match GetModuleHandleW(PCWSTR::null()) {
                 Ok(i) => i,
-                Err(_) => return SelectionResult::Cancelled,
+                Err(_) => {
+                    if let Some(dc) = SCREEN_DC.lock().unwrap().take() {
+                        let _ = DeleteDC(HDC(dc as *mut _));
+                    }
+                    if let Some(bmp) = SCREEN_BITMAP.lock().unwrap().take() {
+                        let _ = DeleteObject(HBITMAP(bmp as *mut _));
+                    }
+                    SELECTING.store(false, Ordering::SeqCst);
+                    return SelectionResult::Cancelled;
+                }
             };
             let class_name: Vec<u16> = "UnifiedSelectorClass\0".encode_utf16().collect();
 
@@ -236,7 +245,16 @@ mod windows_impl {
                     windows::Win32::UI::WindowsAndMessaging::IDC_CROSS,
                 ) {
                     Ok(c) => c,
-                    Err(_) => return SelectionResult::Cancelled,
+                    Err(_) => {
+                        if let Some(dc) = SCREEN_DC.lock().unwrap().take() {
+                            let _ = DeleteDC(HDC(dc as *mut _));
+                        }
+                        if let Some(bmp) = SCREEN_BITMAP.lock().unwrap().take() {
+                            let _ = DeleteObject(HBITMAP(bmp as *mut _));
+                        }
+                        SELECTING.store(false, Ordering::SeqCst);
+                        return SelectionResult::Cancelled;
+                    }
                 },
                 ..Default::default()
             };
@@ -258,7 +276,16 @@ mod windows_impl {
                 None,
             ) {
                 Ok(h) => h,
-                Err(_) => return SelectionResult::Cancelled,
+                Err(_) => {
+                    if let Some(dc) = SCREEN_DC.lock().unwrap().take() {
+                        let _ = DeleteDC(HDC(dc as *mut _));
+                    }
+                    if let Some(bmp) = SCREEN_BITMAP.lock().unwrap().take() {
+                        let _ = DeleteObject(HBITMAP(bmp as *mut _));
+                    }
+                    SELECTING.store(false, Ordering::SeqCst);
+                    return SelectionResult::Cancelled;
+                }
             };
 
             let _ = ShowWindow(hwnd, SW_SHOWNORMAL);
