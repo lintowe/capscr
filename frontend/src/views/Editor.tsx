@@ -367,6 +367,7 @@ export function Editor() {
         ctx.shadowBlur = 4;
         ctx.fillText(op.text, op.origin.x, op.origin.y);
         ctx.shadowBlur = 0;
+        ctx.shadowColor = "transparent";
         break;
       case "blur":
         applyBlur(ctx, op);
@@ -432,6 +433,7 @@ export function Editor() {
     ctx.shadowBlur = 3;
     ctx.fillText(label, op.center.x, op.center.y + 1);
     ctx.shadowBlur = 0;
+    ctx.shadowColor = "transparent";
     ctx.textAlign = "start";
     ctx.textBaseline = "alphabetic";
   }
@@ -471,10 +473,14 @@ export function Editor() {
   }
 
   function applyBlur(ctx: CanvasRenderingContext2D, op: BlurOp) {
-    const w = Math.max(1, Math.floor(op.size.w));
-    const h = Math.max(1, Math.floor(op.size.h));
-    const x = Math.floor(op.origin.x);
-    const y = Math.floor(op.origin.y);
+    const canvasW = ctx.canvas.width;
+    const canvasH = ctx.canvas.height;
+    // clamp to canvas bounds so getImageData never reads outside — reads
+    // outside return transparent black and corrupt the average at edges
+    const x = Math.max(0, Math.min(Math.floor(op.origin.x), canvasW - 1));
+    const y = Math.max(0, Math.min(Math.floor(op.origin.y), canvasH - 1));
+    const w = Math.max(1, Math.min(Math.floor(op.size.w), canvasW - x));
+    const h = Math.max(1, Math.min(Math.floor(op.size.h), canvasH - y));
     if (w <= 0 || h <= 0) return;
 
     // Use a pixelate-style mosaic — it's faster and more privacy-safe than a true blur.

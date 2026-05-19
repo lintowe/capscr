@@ -65,15 +65,29 @@ export function Marketplace() {
     }
   };
 
+  const toggleEnabled = async (entry: InstalledPlugin) => {
+    setBusyId(entry.id);
+    const next = !entry.enabled;
+    setStatus({ tone: "", msg: `${next ? "enabling" : "disabling"} ${entry.name}...` });
+    try {
+      await api.togglePluginEnabled(entry.id, next);
+      setStatus({ tone: "ok", msg: `${entry.name} ${next ? "enabled" : "disabled"}.` });
+      await refetchInstalled();
+    } catch (e) {
+      setStatus({ tone: "err", msg: `toggle failed: ${e}` });
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const uninstall = async (entry: InstalledPlugin) => {
-    const id = entry.name.toLowerCase().replace(/[^a-z0-9_-]/g, "-");
     if (!window.confirm(`Uninstall ${entry.name}? Plugin files will be deleted.`)) {
       return;
     }
-    setBusyId(id);
+    setBusyId(entry.id);
     setStatus({ tone: "", msg: `uninstalling ${entry.name}...` });
     try {
-      await api.marketplaceUninstall(id);
+      await api.marketplaceUninstall(entry.id);
       setStatus({ tone: "ok", msg: `removed ${entry.name}.` });
       await refetchInstalled();
     } catch (e) {
@@ -84,9 +98,7 @@ export function Marketplace() {
   };
 
   const isInstalled = (entryId: string): InstalledPlugin | undefined => {
-    return plugins()?.find(
-      (p) => p.name.toLowerCase().replace(/[^a-z0-9_-]/g, "-") === entryId,
-    );
+    return plugins()?.find((p) => p.id === entryId);
   };
 
   return (
@@ -130,7 +142,6 @@ export function Marketplace() {
           <div class="list">
             <For each={plugins()!}>
               {(p) => {
-                const id = p.name.toLowerCase().replace(/[^a-z0-9_-]/g, "-");
                 return (
                   <div class="list-item">
                     <div class="list-item-body">
@@ -162,7 +173,13 @@ export function Marketplace() {
                       </Show>
                     </div>
                     <div class="list-item-actions">
-                      <button class="btn" data-variant="ghost" data-size="xs">
+                      <button
+                        class="btn"
+                        data-variant="ghost"
+                        data-size="xs"
+                        disabled={busyId() === p.id}
+                        onClick={() => toggleEnabled(p)}
+                      >
                         <Power size={11} stroke-width={1.5} />
                         {p.enabled ? "disable" : "enable"}
                       </button>
@@ -170,7 +187,7 @@ export function Marketplace() {
                         class="btn"
                         data-variant="ghost"
                         data-size="xs"
-                        disabled={busyId() === id}
+                        disabled={busyId() === p.id}
                         onClick={() => uninstall(p)}
                       >
                         <Trash2 size={11} stroke-width={1.5} />

@@ -100,6 +100,7 @@ export interface HistoryEntry {
 }
 
 export interface InstalledPlugin {
+  id: string;
   name: string;
   version: string;
   description: string;
@@ -155,4 +156,6 @@ export const api = {
   marketplaceBrowse: () => invoke<RegistryEntry[]>("marketplace_browse"),
   marketplaceInstall: (id: string) => invoke<void>("marketplace_install", { id }),
   marketplaceUninstall: (id: string) => invoke<void>("marketplace_uninstall", { id }),
+  togglePluginEnabled: (id: string, enabled: boolean) =>
+    invoke<void>("toggle_plugin_enabled", { id, enabled }),
 };

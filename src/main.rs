@@ -184,6 +184,7 @@ fn main() {
             commands::marketplace_browse,
             commands::marketplace_install,
             commands::marketplace_uninstall,
+            commands::toggle_plugin_enabled,
             commands::check_for_updates,
             commands::install_update,
             commands::get_editor_image_path,
