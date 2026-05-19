@@ -221,11 +221,25 @@ pub fn run_capture_pipeline(
         }
     }
 
-    let (image, hdr_bitmap) = match selection {
+    let (mut image, hdr_bitmap, screen_origin): (image::RgbaImage, Option<crate::capture::HdrBitmap>, Option<(i32, i32)>) = match selection {
         SelectionResult::Cancelled => return Ok(()),
-        SelectionResult::Region(rect) => (RegionCapture::new(rect).capture()?, None),
-        SelectionResult::Window(hwnd) => (WindowCapture::new(hwnd).capture()?, None),
-        SelectionResult::FullScreen => capture_active_monitor_with_hdr()?,
+        SelectionResult::Region(rect) => (
+            RegionCapture::new(rect).capture()?,
+            None,
+            Some((rect.x, rect.y)),
+        ),
+        SelectionResult::Window(hwnd) => {
+            let img = WindowCapture::new(hwnd).capture()?;
+            // Look up the window's screen origin so the cursor composite can
+            // land at the right offset within the captured pixels.
+            let origin = window_screen_origin(hwnd);
+            (img, None, origin)
+        }
+        SelectionResult::FullScreen => {
+            let (img, hdr) = capture_active_monitor_with_hdr()?;
+            let origin = active_monitor_origin();
+            (img, hdr, origin)
+        }
         SelectionResult::PickedColor(r, g, b) => {
             let hex = format!("#{:02X}{:02X}{:02X}", r, g, b);
             let mut cb = ClipboardManager::new()?;
@@ -240,6 +254,20 @@ pub fn run_capture_pipeline(
     };
 
     let state = app.state::<AppState>();
+
+    // Honour the show_cursor toggle by painting the live cursor into the
+    // captured pixels at its screen-relative position. Skipped if the
+    // capture didn't expose a screen origin (e.g. an unknown selection
+    // variant). Failures inside composite_system_cursor are silent — they
+    // never take down the capture.
+    {
+        let show = state.config.lock().unwrap().capture.show_cursor;
+        if show {
+            if let Some(origin) = screen_origin {
+                crate::capture::composite_system_cursor(&mut image, origin);
+            }
+        }
+    }
 
     let capture_type = match mode {
         CaptureModeArg::Region => CaptureType::Region,
@@ -362,6 +390,29 @@ fn cursor_position() -> Option<(i32, i32)> {
 #[cfg(not(windows))]
 fn cursor_position() -> Option<(i32, i32)> {
     None
+}
+
+fn window_screen_origin(window_id: u32) -> Option<(i32, i32)> {
+    let windows = xcap::Window::all().ok()?;
+    windows
+        .into_iter()
+        .find(|w| w.id() == window_id)
+        .map(|w| (w.x(), w.y()))
+}
+
+fn active_monitor_origin() -> Option<(i32, i32)> {
+    let (cx, cy) = cursor_position()?;
+    xcap::Monitor::from_point(cx, cy)
+        .ok()
+        .map(|m| (m.x(), m.y()))
+        .or_else(|| {
+            // Fallback to primary if the cursor lookup failed.
+            xcap::Monitor::all()
+                .ok()?
+                .into_iter()
+                .find(|m| m.is_primary())
+                .map(|m| (m.x(), m.y()))
+        })
 }
 
 // If the user opted into HDR preservation and the source produced an HDR
