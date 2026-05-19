@@ -1,18 +1,16 @@
 import { createResource, createSignal, For, Match, Show, Switch } from "solid-js";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { Section } from "../components/Section";
-import { HotkeyInput } from "../components/HotkeyInput";
 import { api, AppConfig } from "../api";
 import { setConfigDirty } from "../dirty";
 import { FolderOpen, RotateCcw, Save } from "lucide-solid";
 
-type Pane = "general" | "capture" | "hdr" | "hotkeys" | "notify";
+type Pane = "general" | "capture" | "hdr" | "notify";
 
 const PANES: { id: Pane; label: string }[] = [
   { id: "general", label: "general" },
   { id: "capture", label: "capture" },
   { id: "hdr", label: "hdr" },
-  { id: "hotkeys", label: "hotkeys" },
   { id: "notify", label: "notify" },
 ];
 
@@ -112,9 +110,6 @@ export function Settings() {
               </Match>
               <Match when={pane() === "hdr"}>
                 <HdrPane c={c()} patch={patch} />
-              </Match>
-              <Match when={pane() === "hotkeys"}>
-                <HotkeysPane c={c()} patch={patch} />
               </Match>
               <Match when={pane() === "notify"}>
                 <NotifyPane c={c()} patch={patch} />
@@ -467,37 +462,6 @@ function HdrPane(props: { c: AppConfig; patch: Patch }) {
   );
 }
 
-function HotkeysPane(props: { c: AppConfig; patch: Patch }) {
-  const c = () => props.c;
-  return (
-    <Section title="quick hotkeys">
-      <div class="field">
-        <label class="field-label">screenshot</label>
-        <div class="field-control">
-          <HotkeyInput
-            value={c().hotkeys.screenshot}
-            onChange={(v) =>
-              props.patch("hotkeys", { ...c().hotkeys, screenshot: v })
-            }
-          />
-          <span class="field-hint">click, press combo. esc cancels.</span>
-        </div>
-      </div>
-      <div class="field">
-        <label class="field-label">record gif</label>
-        <div class="field-control">
-          <HotkeyInput
-            value={c().hotkeys.record_gif}
-            onChange={(v) =>
-              props.patch("hotkeys", { ...c().hotkeys, record_gif: v })
-            }
-          />
-          <span class="field-hint">for per-task hotkeys, see tasks tab</span>
-        </div>
-      </div>
-    </Section>
-  );
-}
 
 function NotifyPane(props: { c: AppConfig; patch: Patch }) {
   const c = () => props.c;

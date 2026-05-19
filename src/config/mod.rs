@@ -108,11 +108,11 @@ pub enum TaskUploadTarget {
 fn default_capture_tasks() -> Vec<CaptureTask> {
     vec![
         CaptureTask {
-            id: "screenshot-clipboard".to_string(),
-            name: "Screenshot to clipboard".to_string(),
+            id: "screenshot-save-clipboard".to_string(),
+            name: "Screenshot — save + clipboard".to_string(),
             hotkey: "PrintScreen".to_string(),
             capture_mode: TaskCaptureMode::Region,
-            post_action: TaskPostAction::Clipboard,
+            post_action: TaskPostAction::SaveAndClipboard,
             target_destination: None,
         },
         CaptureTask {

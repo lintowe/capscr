@@ -6,6 +6,14 @@ format follows [keep-a-changelog](https://keepachangelog.com/en/1.1.0/) loosely.
 
 nothing pending. drop ideas in github issues.
 
+## [0.3.35] — 2026-05-19
+
+### changed
+- **default screenshot action is now save + clipboard** — fresh installs get `PrintScreen → region → save + clipboard` instead of clipboard-only. existing configs are unaffected. this matches what most users expect from a screen capture tool (file stays on disk, url/image immediately pasteable).
+- **settings hotkeys pane removed** — the `[hotkeys]` config section (`hotkeys.screenshot`, `hotkeys.record_gif`) was displayed in settings but those values were never registered as global hotkeys — all hotkey registration runs through the tasks system. showing editable-but-inert fields was misleading. global hotkeys live entirely in the tasks tab now.
+- **new task default is save + clipboard** — clicking `new` in the tasks tab pre-selects `save-and-clipboard` instead of `clipboard`. consistent with the fresh-install default.
+- **destinations lede no longer says "https only"** — ftp doesn't use https; the incorrect note is removed.
+
 ## [0.3.34] — 2026-05-19
 
 ### added

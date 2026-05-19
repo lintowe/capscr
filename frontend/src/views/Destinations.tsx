@@ -34,7 +34,7 @@ export function Destinations() {
     <>
       <div class="view-head">
         <h1>destinations</h1>
-        <span class="lede">where uploads go. https only.</span>
+        <span class="lede">where uploads go.</span>
       </div>
 
       <Show

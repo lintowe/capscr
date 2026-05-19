@@ -59,7 +59,7 @@ export function Tasks() {
       name: "new task",
       hotkey: "",
       capture_mode: "region",
-      post_action: "clipboard",
+      post_action: "save-and-clipboard",
       target_destination: null,
     };
     mutate({ ...c, capture_tasks: [...c.capture_tasks, newTask] });
