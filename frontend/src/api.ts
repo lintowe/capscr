@@ -32,13 +32,24 @@ export interface CaptureConfig {
   hdr: HdrConfig;
 }
 
+export interface FtpConfig {
+  host: string;
+  port: number;
+  username: string;
+  password: string;
+  remote_dir: string;
+  use_tls: boolean;
+  public_url_template: string;
+}
+
 export interface UploadConfig {
-  destination: "Imgur" | "Custom";
+  destination: "Imgur" | "Custom" | "Ftp";
   copy_url_to_clipboard: boolean;
   custom_url: string;
   custom_form_name: string;
   custom_response_path: string;
   imgur_client_id: string;
+  ftp: FtpConfig;
 }
 
 export interface UiConfig {
