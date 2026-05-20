@@ -2,10 +2,11 @@
 name = "capscr"
 version = "0.3.38"
 edition = "2021"
-description = "A clean, modern screen capture tool with HDR support"
-authors = ["capscr"]
+description = "Fast HDR-aware Windows screen capture, designed to replace ShareX without the bloat."
+authors = ["rot <96458554+rotlove@users.noreply.github.com>"]
 license = "MIT"
 repository = "https://github.com/lintowe/capscr"
+homepage = "https://rot.lt/work/capscr"
 
 [features]
 default = []
