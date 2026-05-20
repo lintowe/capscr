@@ -632,6 +632,7 @@ impl Config {
         }
 
         let mut seen_ids = std::collections::HashSet::new();
+        let mut seen_hotkeys = std::collections::HashSet::new();
         for task in &self.capture_tasks {
             if task.id.is_empty()
                 || !task.id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
@@ -646,6 +647,12 @@ impl Config {
             }
             if !seen_ids.insert(task.id.clone()) {
                 return Err(anyhow!("duplicate capture_task id: {}", task.id));
+            }
+            if !task.hotkey.is_empty() && !seen_hotkeys.insert(task.hotkey.clone()) {
+                return Err(anyhow!(
+                    "duplicate hotkey '{}' on task '{}'",
+                    task.hotkey, task.id
+                ));
             }
             if task.name.is_empty() || task.name.len() > 128 {
                 return Err(anyhow!("capture_task name length invalid for {}", task.id));
