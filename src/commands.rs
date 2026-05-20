@@ -1324,7 +1324,16 @@ fn finalize_gif_recording(task: &CaptureTask, app: &AppHandle) {
 
     if let Some(ref mut rec) = recorder {
         rec.stop();
-        std::thread::sleep(Duration::from_millis(250));
+        // wait for the capture thread to finish rather than sleeping a fixed
+        // duration — the thread sets state to Processing after its last frame
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !matches!(rec.state(), crate::recording::RecordingState::Processing) {
+            if std::time::Instant::now() >= deadline {
+                tracing::warn!("gif capture thread did not finish within 5s; saving partial frames");
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
 
         let mut path = cfg.output_path();
         path.set_extension("gif");
