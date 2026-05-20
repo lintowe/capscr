@@ -4,7 +4,7 @@ use anyhow::{anyhow, Result};
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 const MAX_QUALITY: u8 = 100;
 const MIN_GIF_FPS: u32 = 1;
@@ -819,8 +819,8 @@ impl Config {
         Ok(Config::default())
     }
 
-    fn backup_corrupt_config(path: &PathBuf, content: &str) {
-        let mut backup = path.clone();
+    fn backup_corrupt_config(path: &Path, content: &str) {
+        let mut backup = path.to_path_buf();
         let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
         let new_name = format!(
             "config.bad.{stamp}.toml"
