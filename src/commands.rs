@@ -588,6 +588,9 @@ fn run_post_action(
         PostCaptureAction::Upload => {
             let result = do_upload()?;
             Sound::Upload.play_if_enabled(config.post_capture.play_sound);
+            if config.ui.show_notifications {
+                let _ = show_notification("Uploaded", &result.url);
+            }
             emit_upload_success(app, &result);
             Ok(None)
         }
@@ -676,7 +679,7 @@ pub fn list_captures(state: State<AppState>) -> Result<Vec<HistoryEntry>, String
             .modified()
             .ok()
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|d| d.as_secs())
+            .map(|d| d.as_millis() as u64)
             .unwrap_or(0);
 
         let has_hdr = path
@@ -758,11 +761,20 @@ pub fn reupload_capture(
     if ext == "gif" {
         return Err("GIF reupload is not yet supported — open the file manually and upload it from there".into());
     }
-    let img = image::open(&canonical).map_err(|e| e.to_string())?;
-    let rgba = img.to_rgba8();
+    let mime = match ext.as_str() {
+        "jpg" | "jpeg" => "image/jpeg",
+        "webp" => "image/webp",
+        "bmp" => "image/bmp",
+        _ => "image/png",
+    };
+    let bytes = std::fs::read(&canonical).map_err(|e| e.to_string())?;
+    let file_name = canonical.file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("capture")
+        .to_string();
     let uploader = crate::upload::shared_uploader().map_err(|e| e.to_string())?;
     let service = build_upload_service(&config);
-    let result = uploader.upload(&rgba, &service).map_err(|e| e.to_string())?;
+    let result = uploader.upload_raw(&bytes, mime, &file_name, &service).map_err(|e| e.to_string())?;
     *state.last_upload.lock().unwrap() = Some(UploadRecord {
         url: result.url.clone(),
         delete_url: result.delete_url.clone(),
@@ -1211,7 +1223,19 @@ fn run_gif_task(task: &CaptureTask, app: &AppHandle) -> anyhow::Result<()> {
         return Ok(());
     }
 
+    // gate is held only during selection so a screenshot hotkey pressed while
+    // the region selector is visible doesn't open a second overlay
+    use std::sync::atomic::Ordering as OrdGif;
+    if state.capture_in_progress
+        .compare_exchange(false, true, OrdGif::SeqCst, OrdGif::SeqCst)
+        .is_err()
+    {
+        tracing::info!("capture already in progress; dropping gif trigger");
+        return Ok(());
+    }
     let selection = UnifiedSelector::select();
+    state.capture_in_progress.store(false, OrdGif::SeqCst);
+
     let region = match selection {
         SelectionResult::Region(r) => r,
         SelectionResult::Cancelled => return Ok(()),

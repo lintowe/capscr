@@ -8,6 +8,7 @@ import {
   Show,
 } from "solid-js";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import {
   Copy,
   RefreshCw,
@@ -29,7 +30,7 @@ function formatBytes(b: number): string {
 }
 
 function formatDate(unix: number): string {
-  return new Date(unix * 1000).toLocaleString(undefined, {
+  return new Date(unix).toLocaleString(undefined, {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -91,6 +92,15 @@ export function History() {
   };
 
   const [deleteError, setDeleteError] = createSignal<string | null>(null);
+  const [uploadError, setUploadError] = createSignal<string | null>(null);
+  let uploadErrorTimer: ReturnType<typeof setTimeout>;
+  const doReupload = (path: string) => {
+    api.reuploadCapture(path).catch((e: unknown) => {
+      setUploadError(String(e));
+      clearTimeout(uploadErrorTimer);
+      uploadErrorTimer = setTimeout(() => setUploadError(null), 6000);
+    });
+  };
   const doDelete = (path: string) => {
     api.deleteCapture(path).then(() => {
       setConfirmDelete(null);
@@ -168,6 +178,11 @@ export function History() {
           delete failed: {deleteError()}
         </div>
       </Show>
+      <Show when={uploadError()}>
+        <div class="flash" data-tone="err" style="margin-bottom: 12px;">
+          upload failed: {uploadError()}
+        </div>
+      </Show>
 
       <Show
         when={entries() && entries()!.length > 0}
@@ -219,7 +234,7 @@ export function History() {
               >
                 <img
                   class="tile-img"
-                  src={`asset://localhost/${encodeURIComponent(e.path.replaceAll("\\", "/"))}`}
+                  src={convertFileSrc(e.path)}
                   alt={e.filename}
                   onError={(ev) => {
                     (ev.currentTarget as HTMLImageElement).style.opacity =
@@ -237,7 +252,7 @@ export function History() {
                   <button
                     class="icon-btn"
                     title="re-upload"
-                    onClick={() => api.reuploadCapture(e.path)}
+                    onClick={() => doReupload(e.path)}
                   >
                     <UploadCloud size={12} stroke-width={1.5} />
                   </button>
