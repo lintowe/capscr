@@ -464,14 +464,10 @@ fn spawn_hotkey_thread(
                             err.task_id,
                             err.reason
                         );
-                        commands::emit_error(
-                            &app,
-                            "hotkey",
-                            &format!(
-                                "'{}' ({}) — {}",
-                                err.hotkey, err.task_id, err.reason
-                            ),
-                        );
+                        let msg = format!("'{}' ({}) — {}", err.hotkey, err.task_id, err.reason);
+                        commands::emit_error(&app, "hotkey", &msg);
+                        // also send an OS notification since the hub may be hidden
+                        let _ = crate::clipboard::show_notification("Hotkey conflict", &msg);
                     }
                 }
             }

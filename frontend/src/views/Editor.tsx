@@ -1,6 +1,6 @@
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { api } from "../api";
 import {
@@ -187,8 +187,7 @@ export function Editor() {
     }
 
     const img = new Image();
-    // replace backslashes so Windows paths work under the asset:// protocol
-    img.src = `asset://localhost/${encodeURIComponent(path.replaceAll("\\", "/"))}`;
+    img.src = convertFileSrc(path);
     try {
       await img.decode();
     } catch (e) {
@@ -309,6 +308,7 @@ export function Editor() {
       }
       return;
     }
+    setStatus({ tone: "", msg: "paste: only images are accepted here — use the text tool to add text" });
   };
 
   // Truthy when there's at least one committed edit (or a draft mid-drag).
