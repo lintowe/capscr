@@ -11,6 +11,7 @@ mod marketplace;
 mod overlay;
 mod plugin;
 mod recording;
+mod secret;
 mod sound;
 mod state;
 mod upload;

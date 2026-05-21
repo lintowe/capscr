@@ -72,7 +72,25 @@ pub fn is_hdr_capture(path: String) -> bool {
 }
 
 #[tauri::command]
-pub fn set_config(config: Config, app: AppHandle, state: State<AppState>) -> Result<(), String> {
+pub fn set_config(
+    mut config: Config,
+    app: AppHandle,
+    state: State<AppState>,
+) -> Result<(), String> {
+    // preserve the encrypted FTP password when the UI sent an empty plaintext
+    // input — without this, every Settings → Save would wipe the vault unless
+    // the user retypes their password each time. The frontend shows an empty
+    // input when an encrypted blob exists, so empty here means "keep current"
+    {
+        let stored = state.config.lock().unwrap();
+        if config.upload.ftp.password.is_empty()
+            && config.upload.ftp.password_encrypted.is_empty()
+            && !stored.upload.ftp.password_encrypted.is_empty()
+        {
+            config.upload.ftp.password_encrypted =
+                stored.upload.ftp.password_encrypted.clone();
+        }
+    }
     config.validate().map_err(|e| e.to_string())?;
     config.save().map_err(|e| e.to_string())?;
     crate::install_hdr_runtime_from_config(&config);
@@ -379,7 +397,7 @@ fn build_ftp_service(config: &Config) -> UploadService {
         host: config.upload.ftp.host.clone(),
         port: config.upload.ftp.port,
         username: config.upload.ftp.username.clone(),
-        password: config.upload.ftp.password.clone(),
+        password: config.upload.ftp.password_plaintext(),
         remote_dir: config.upload.ftp.remote_dir.clone(),
         use_tls: config.upload.ftp.use_tls,
         public_url_template: config.upload.ftp.public_url_template.clone(),

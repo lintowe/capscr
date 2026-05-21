@@ -1,6 +1,6 @@
 [package]
 name = "capscr"
-version = "0.3.42"
+version = "0.3.43"
 edition = "2021"
 description = "Fast HDR-aware Windows screen capture — tray-first, signed updates, no telemetry."
 authors = ["rot <96458554+rotlove@users.noreply.github.com>"]
@@ -88,7 +88,7 @@ uuid = { version = "1.0", features = ["v4"] }
 # build stays small while we iterate on the host API.
 zip = "2.2"
 semver = "1.0"
-wasmtime = { version = "29", default-features = false, features = ["cranelift", "runtime"], optional = true }
+wasmtime = { version = "43", default-features = false, features = ["cranelift", "runtime", "std"], optional = true }
 
 # Marketplace integrity — sha256 of plugin payload + hex en/decode for the
 # manifest entry. Both already transitive; pinning them as direct deps so the
@@ -122,6 +122,7 @@ windows = { version = "0.58", features = [
     "Win32_Graphics_Direct3D11",
     "Win32_Graphics_Direct3D",
     "Win32_Media_Audio",
+    "Win32_Security_Cryptography",
     "Graphics_Capture",
     "Graphics_DirectX",
     "Graphics_DirectX_Direct3D11",

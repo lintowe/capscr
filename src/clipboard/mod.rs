@@ -261,9 +261,21 @@ fn sanitize_notification_text(text: &str) -> String {
         .collect()
 }
 
+/// minimum gap between two identical (title, body) notifications.
+/// Without this guard a tight retry loop in upload/capture can spam Action
+/// Center with five copies of the same "Capture saved" toast.
+const NOTIFICATION_DEDUPE_MS: u128 = 1500;
+
 pub fn show_notification(title: &str, body: &str) -> Result<()> {
     let safe_title = sanitize_notification_text(title);
     let safe_body = sanitize_notification_text(body);
+
+    // dedupe: drop the call if an identical notification fired within the
+    // last NOTIFICATION_DEDUPE_MS. Cheap mutex on a 2-tuple is fine here
+    // because this path is called at human speed.
+    if !should_emit(&safe_title, &safe_body) {
+        return Ok(());
+    }
 
     let mut n = notify_rust::Notification::new();
     n.summary(&safe_title)
@@ -279,4 +291,26 @@ pub fn show_notification(title: &str, body: &str) -> Result<()> {
     n.show()?;
 
     Ok(())
+}
+
+fn should_emit(title: &str, body: &str) -> bool {
+    use std::sync::Mutex;
+    use std::time::Instant;
+    static LAST: std::sync::OnceLock<Mutex<Option<(String, String, Instant)>>> =
+        std::sync::OnceLock::new();
+    let cell = LAST.get_or_init(|| Mutex::new(None));
+    let Ok(mut guard) = cell.lock() else {
+        return true; // poisoned mutex → fail open, never silence accidentally
+    };
+    let now = Instant::now();
+    if let Some((t, b, when)) = guard.as_ref() {
+        if t == title
+            && b == body
+            && now.duration_since(*when).as_millis() < NOTIFICATION_DEDUPE_MS
+        {
+            return false;
+        }
+    }
+    *guard = Some((title.to_string(), body.to_string(), now));
+    true
 }
