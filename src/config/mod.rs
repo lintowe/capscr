@@ -432,14 +432,41 @@ pub struct FtpUploadConfig {
     pub port: u16,
     #[serde(default)]
     pub username: String,
+    /// plaintext password (legacy field). Kept for backward compatibility
+    /// only — Config::load migrates any non-empty value into the encrypted
+    /// vault on next save. New configs leave this empty.
     #[serde(default)]
     pub password: String,
+    /// DPAPI-wrapped password (hex-encoded). Bound to the current user
+    /// account — copying config.toml to another machine or user account
+    /// makes this unrecoverable.
+    #[serde(default)]
+    pub password_encrypted: String,
     #[serde(default)]
     pub remote_dir: String,
     #[serde(default)]
     pub use_tls: bool,
     #[serde(default)]
     pub public_url_template: String,
+}
+
+impl FtpUploadConfig {
+    /// returns the decrypted password (or empty string if neither field set).
+    /// Tries the encrypted vault first; falls back to plaintext for
+    /// already-saved-but-not-yet-migrated configs.
+    pub fn password_plaintext(&self) -> String {
+        if !self.password_encrypted.is_empty() {
+            match crate::secret::decrypt(&self.password_encrypted) {
+                Ok(p) => return p,
+                Err(e) => {
+                    tracing::warn!(
+                        "FTP password decrypt failed (corrupt blob or wrong user?): {e}"
+                    );
+                }
+            }
+        }
+        self.password.clone()
+    }
 }
 
 fn default_ftp_port() -> u16 {
@@ -803,6 +830,21 @@ impl Config {
                             );
                             return Ok(Config::default());
                         }
+                        // first-launch-after-upgrade migration: if the legacy
+                        // plaintext FTP password is set but the encrypted slot
+                        // is empty, wrap it now and persist. The user never
+                        // sees their cleartext password on disk again.
+                        let needs_secret_migration = !config.upload.ftp.password.is_empty()
+                            && config.upload.ftp.password_encrypted.is_empty();
+                        if needs_secret_migration {
+                            config.migrate_secrets();
+                            if let Err(e) = config.save() {
+                                tracing::warn!(
+                                    "secret migration save failed: {e}; \
+                                     plaintext password stays on disk for now"
+                                );
+                            }
+                        }
                         return Ok(config);
                     }
                     Err(e) => {
@@ -835,10 +877,15 @@ impl Config {
 
     pub fn save(&self) -> Result<()> {
         self.validate()?;
+        // migrate any plaintext FTP password into the DPAPI vault on save so
+        // the on-disk config never carries credentials in the clear once the
+        // user has done at least one save with 0.3.43+
+        let mut to_persist = self.clone();
+        to_persist.migrate_secrets();
         if let Some(dir) = Self::config_dir() {
             fs::create_dir_all(&dir)?;
             if let Some(path) = Self::config_path() {
-                let content = toml::to_string_pretty(self)?;
+                let content = toml::to_string_pretty(&to_persist)?;
                 // atomic write: write to a temp file, then rename so a crash
                 // mid-write can't leave config.toml truncated/corrupted
                 let tmp = path.with_extension("toml.tmp");
@@ -847,6 +894,27 @@ impl Config {
             }
         }
         Ok(())
+    }
+
+    /// in-place: encrypt any plaintext secrets that haven't been wrapped yet
+    /// and clear the plaintext field. Idempotent — running twice is a no-op
+    /// after the first.
+    pub fn migrate_secrets(&mut self) {
+        let ftp = &mut self.upload.ftp;
+        if !ftp.password.is_empty() && ftp.password_encrypted.is_empty() {
+            match crate::secret::encrypt(&ftp.password) {
+                Ok(blob) => {
+                    ftp.password_encrypted = blob;
+                    ftp.password.clear();
+                    tracing::info!("migrated FTP password into encrypted vault");
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "FTP password DPAPI encrypt failed; leaving plaintext: {e}"
+                    );
+                }
+            }
+        }
     }
 
     pub fn ensure_output_dir(&self) -> Result<()> {

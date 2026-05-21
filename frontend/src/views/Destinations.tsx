@@ -174,6 +174,11 @@ export function Destinations() {
                   <div class="field-control">
                     <input
                       type="password"
+                      placeholder={
+                        c().upload.ftp.password_encrypted
+                          ? "(stored — leave blank to keep current)"
+                          : ""
+                      }
                       value={c().upload.ftp.password}
                       onInput={(e) =>
                         patch({
@@ -182,7 +187,11 @@ export function Destinations() {
                         })
                       }
                     />
-                    <span class="field-hint">stored in config.toml (plaintext)</span>
+                    <span class="field-hint">
+                      {c().upload.ftp.password_encrypted
+                        ? "encrypted at rest with Windows DPAPI (per-user)"
+                        : "encrypted at rest with Windows DPAPI on save"}
+                    </span>
                   </div>
                 </div>
                 <div class="field">

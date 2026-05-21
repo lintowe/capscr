@@ -36,7 +36,13 @@ export interface FtpConfig {
   host: string;
   port: number;
   username: string;
+  /** plaintext password as typed by the user. on every save, set_config
+   *  encrypts this into password_encrypted via Windows DPAPI and clears
+   *  it from disk. An empty string here means "keep the current vault" */
   password: string;
+  /** DPAPI-wrapped hex blob. read-only from the frontend's perspective —
+   *  set by the backend on save, used as a "vault populated" sentinel */
+  password_encrypted: string;
   remote_dir: string;
   use_tls: boolean;
   public_url_template: string;

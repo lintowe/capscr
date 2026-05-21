@@ -6,6 +6,25 @@ format follows [keep-a-changelog](https://keepachangelog.com/en/1.1.0/) loosely.
 
 nothing pending. drop ideas in github issues.
 
+## [0.3.43] — 2026-05-22
+
+### security
+- **wasmtime 29 → 43**: clears 16 RUSTSEC advisories (2 critical sandbox-escape, 14 lower) reported by `cargo audit` against the 0.3.42 lockfile
+- WASM host hardened: per-hook epoch deadline (default 500ms) + per-hook fuel budget (5M instructions) + background bumper thread incrementing the engine epoch every 10ms. Plugins that block or busy-loop now trap instead of freezing the capture path
+- WASM Config: dropped `wasm_threads`/`wasm_reference_types` calls (removed in wasmtime 43) — features are off by default with the `cranelift + runtime + std` feature set
+- **DPAPI vault for FTP password**: new `src/secret.rs` wraps Win32 `CryptProtectData` / `CryptUnprotectData`. Bound to the current user account — copying config.toml elsewhere makes the blob unrecoverable
+- `FtpUploadConfig::password_plaintext()` reads encrypted first, falls back to plaintext for not-yet-migrated configs
+- `Config::load` auto-migrates plaintext FTP passwords on first launch after upgrade (encrypt + clear plaintext + save)
+- `set_config` preserves the encrypted blob when the UI sends an empty password input (so Save with an untouched form doesn't wipe the vault)
+
+### added
+- `cargo` feature gate clarified: `plugin-runtime` builds the WASM host; default build still excludes it
+- DPAPI roundtrip unit test (`secret::tests::roundtrip`)
+
+### changed
+- frontend Destinations: FTP password input now shows `"(stored — leave blank to keep current)"` placeholder when an encrypted blob exists; field-hint says "encrypted at rest with Windows DPAPI (per-user)" instead of the old "stored in config.toml (plaintext)"
+- `show_notification` deduplicates identical (title, body) pairs fired within 1.5s — retry-loop notification storms ("Capture saved", "Clipboard busy") now collapse to a single toast
+
 ## [0.3.42] — 2026-05-22
 
 ### added

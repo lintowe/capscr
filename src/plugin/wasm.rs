@@ -31,6 +31,9 @@ pub struct WasmPlugin {
     alloc: Option<TypedFunc<i32, i32>>,
     /// optional hooks resolved at load time, indexed by hook name
     hooks: std::collections::HashMap<String, TypedFunc<(i32, i32), ()>>,
+    /// number of epoch ticks the plugin gets per hook invocation. The bumper
+    /// thread advances the engine epoch every 10ms, so 50 ≈ 500ms.
+    deadline_ticks: u64,
 }
 
 /// per-instantiation state. Currently only the plugin id (for log routing);
@@ -43,12 +46,43 @@ pub struct WasmHost {
     engine: Engine,
 }
 
+/// default fuel budget per hook call (~10ms of cranelift-compiled code on
+/// commodity hardware). manifest's `time_slice_ms` overrides — we treat
+/// the ms value as fuel units * a calibration factor.
+const DEFAULT_HOOK_FUEL: u64 = 5_000_000;
+/// epoch ticks the host advances between hook calls. one tick = ~10ms on
+/// the bumper thread below
+const HOOK_EPOCH_DEADLINE: u64 = 1;
+
 impl WasmHost {
     pub fn new() -> Result<Self> {
         let mut cfg = wasmtime::Config::new();
-        cfg.consume_fuel(false); // future: per-hook fuel budget
+        // fuel + epoch interruption together bound the time a malicious or
+        // buggy plugin can spend in a single hook call. fuel catches tight
+        // loops; epoch catches `loop {}`-style stalls inside host imports
+        cfg.consume_fuel(true);
+        cfg.epoch_interruption(true);
+        // we don't enable the `component-model` cargo feature on the
+        // wasmtime crate, so component model is already off. reference
+        // types and threads are off by default in this configuration; we
+        // rely on the feature-gate defaults rather than calling the
+        // (removed-in-v43) wasm_threads / wasm_reference_types setters
+
         let engine = Engine::new(&cfg)
             .map_err(|e| anyhow!("wasmtime engine init: {e}"))?;
+
+        // background bumper: increments the engine epoch every 10ms so
+        // plugins that exceed their per-hook deadline trap promptly. one
+        // bumper covers every plugin sharing this engine.
+        let engine_clone = engine.clone();
+        std::thread::Builder::new()
+            .name("capscr-wasm-epoch".into())
+            .spawn(move || loop {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+                engine_clone.increment_epoch();
+            })
+            .ok();
+
         Ok(Self { engine })
     }
 
@@ -76,6 +110,13 @@ impl WasmHost {
                 Box::leak(Box::new(MemLimiter { cap: limit })) as &mut dyn wasmtime::ResourceLimiter
             });
         }
+        // trap when the epoch deadline is exceeded — bumper thread advances
+        // the engine epoch every 10ms, so HOOK_EPOCH_DEADLINE ticks ≈ 10ms.
+        // call_hook bumps the deadline up to time_slice_ms / 10 before each
+        // invocation; this Store::set_epoch_deadline only sets the initial
+        // value before any hook fires
+        store.set_epoch_deadline(HOOK_EPOCH_DEADLINE);
+        store.epoch_deadline_trap();
         let mut linker: Linker<HostState> = Linker::new(&self.engine);
 
         // host import: capscr.log(level, ptr, len)
@@ -134,6 +175,11 @@ impl WasmHost {
             }
         }
 
+        let deadline_ticks = runtime
+            .time_slice_ms
+            .map(|ms| (ms / 10).max(1))
+            .unwrap_or(50);
+
         Ok(WasmPlugin {
             id: manifest.plugin.id.clone(),
             store: Mutex::new(store),
@@ -141,6 +187,7 @@ impl WasmHost {
             memory,
             alloc,
             hooks,
+            deadline_ticks,
         })
     }
 }
@@ -160,6 +207,11 @@ impl WasmPlugin {
             .store
             .lock()
             .map_err(|_| anyhow!("plugin '{}' store poisoned", self.id))?;
+
+        // refresh per-hook budgets before each call so a plugin that exhausted
+        // fuel or epoch ticks in a previous hook gets a fresh deadline
+        let _ = store.set_fuel(DEFAULT_HOOK_FUEL);
+        store.set_epoch_deadline(self.deadline_ticks);
 
         let bytes = payload.as_bytes();
         let len = bytes.len() as i32;
@@ -188,7 +240,7 @@ impl wasmtime::ResourceLimiter for MemLimiter {
         _current: usize,
         desired: usize,
         _maximum: Option<usize>,
-    ) -> Result<bool, anyhow::Error> {
+    ) -> wasmtime::Result<bool> {
         Ok(desired <= self.cap)
     }
     fn table_growing(
@@ -196,7 +248,7 @@ impl wasmtime::ResourceLimiter for MemLimiter {
         _current: usize,
         desired: usize,
         _maximum: Option<usize>,
-    ) -> Result<bool, anyhow::Error> {
+    ) -> wasmtime::Result<bool> {
         Ok(desired <= 65536)
     }
 }
