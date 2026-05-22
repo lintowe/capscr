@@ -22,6 +22,7 @@ pub enum UploadService {
     ImgurWithClientId(String),
     Custom(CustomUploader),
     Ftp(FtpTarget),
+    Sftp(SftpTarget),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -32,6 +33,16 @@ pub struct FtpTarget {
     pub password: String,
     pub remote_dir: String,
     pub use_tls: bool,
+    pub public_url_template: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SftpTarget {
+    pub host: String,
+    pub port: u16,
+    pub username: String,
+    pub password: String,
+    pub remote_dir: String,
     pub public_url_template: String,
 }
 
@@ -310,6 +321,7 @@ impl ImageUploader {
                     self.upload_custom(data, mime, file_name, config)
                 }
                 UploadService::Ftp(target) => upload_ftp(data, file_name, target),
+                UploadService::Sftp(target) => upload_sftp(data, file_name, target),
             };
             match result {
                 Ok(r) => return Ok(r),
@@ -775,6 +787,122 @@ pub fn upload_ftp(data: &[u8], file_name: &str, target: &FtpTarget) -> Result<Up
     };
     close_quietly(stream);
     Ok(result)
+}
+
+#[cfg(feature = "sftp")]
+pub fn upload_sftp(data: &[u8], file_name: &str, target: &SftpTarget) -> Result<UploadResult> {
+    use async_trait::async_trait;
+    use russh::client;
+    use russh_sftp::client::SftpSession;
+    use russh_sftp::protocol::OpenFlags;
+    use std::sync::Arc;
+    use tokio::io::AsyncWriteExt;
+
+    validate_host(&target.host)?;
+    validate_remote_dir(&target.remote_dir)?;
+    validate_resolved_host(&target.host, target.port.max(1))?;
+
+    let safe = sanitize_remote_filename(file_name);
+    let filename = uniquify_remote_filename(&safe);
+    let host = target.host.clone();
+    let port = target.port.max(1);
+    let username = target.username.clone();
+    let password = target.password.clone();
+    let remote_dir = target.remote_dir.clone();
+    let url_template = target.public_url_template.clone();
+    let data_owned = data.to_vec();
+
+    // host-key acceptance policy: by design we accept any server key on first
+    // connect (no TOFU pinning surface yet — see #50 in roadmap). this matches
+    // the FTP path's "trust the configured host" stance; users who care about
+    // server-key verification should put the SFTP host behind a known-good
+    // tunnel until the pin store lands.
+    struct AcceptAny;
+    #[async_trait]
+    impl client::Handler for AcceptAny {
+        type Error = russh::Error;
+        async fn check_server_key(
+            &mut self,
+            _key: &russh::keys::ssh_key::PublicKey,
+        ) -> std::result::Result<bool, Self::Error> {
+            Ok(true)
+        }
+    }
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| anyhow!("SFTP runtime init failed: {e}"))?;
+
+    let upload_filename = filename.clone();
+    runtime.block_on(async move {
+        let config = Arc::new(client::Config {
+            inactivity_timeout: Some(std::time::Duration::from_secs(UPLOAD_TIMEOUT_SECS)),
+            ..Default::default()
+        });
+        let mut session = client::connect(config, (host.as_str(), port), AcceptAny)
+            .await
+            .map_err(|e| anyhow!("SFTP connect to {}:{} failed: {}", host, port, e))?;
+
+        let authed = session
+            .authenticate_password(&username, &password)
+            .await
+            .map_err(|e| anyhow!("SFTP authenticate_password failed: {e}"))?;
+        if !authed {
+            return Err(anyhow!("SFTP authentication rejected (bad username or password)"));
+        }
+
+        let channel = session
+            .channel_open_session()
+            .await
+            .map_err(|e| anyhow!("SFTP channel_open_session failed: {e}"))?;
+        channel
+            .request_subsystem(true, "sftp")
+            .await
+            .map_err(|e| anyhow!("SFTP request_subsystem failed: {e}"))?;
+
+        let sftp = SftpSession::new(channel.into_stream())
+            .await
+            .map_err(|e| anyhow!("SFTP session init failed: {e}"))?;
+
+        let target_path = if remote_dir.is_empty() {
+            upload_filename.clone()
+        } else {
+            let trimmed = remote_dir.trim_end_matches('/');
+            format!("{}/{}", trimmed, upload_filename)
+        };
+
+        let mut file = sftp
+            .open_with_flags(
+                &target_path,
+                OpenFlags::CREATE | OpenFlags::TRUNCATE | OpenFlags::WRITE,
+            )
+            .await
+            .map_err(|e| anyhow!("SFTP open '{}' for write failed: {e}", target_path))?;
+
+        if let Err(e) = file.write_all(&data_owned).await {
+            // best-effort cleanup so a partial upload doesn't leave a 0-byte
+            // or truncated file on the server.
+            let _ = file.shutdown().await;
+            let _ = sftp.remove_file(&target_path).await;
+            return Err(anyhow!("SFTP write_all failed: {e}"));
+        }
+        if let Err(e) = file.shutdown().await {
+            return Err(anyhow!("SFTP file close failed: {e}"));
+        }
+
+        Ok(())
+    })?;
+
+    let url = build_url(&url_template, &filename)?;
+    Ok(UploadResult { url, delete_url: None })
+}
+
+#[cfg(not(feature = "sftp"))]
+pub fn upload_sftp(_data: &[u8], _file_name: &str, _target: &SftpTarget) -> Result<UploadResult> {
+    Err(anyhow!(
+        "SFTP support not compiled in — rebuild with --features sftp (or restore the default feature set)"
+    ))
 }
 
 fn sanitize_remote_filename(name: &str) -> String {

@@ -1,6 +1,6 @@
 [package]
 name = "capscr"
-version = "0.3.45"
+version = "0.3.46"
 edition = "2021"
 description = "Fast HDR-aware Windows screen capture — tray-first, signed updates, no telemetry."
 authors = ["rot <96458554+rotlove@users.noreply.github.com>"]
@@ -9,11 +9,14 @@ repository = "https://github.com/lintowe/capscr"
 homepage = "https://rot.lt/work/capscr"
 
 [features]
-default = []
+default = ["sftp"]
 # WASM plugin runtime host. When enabled, src/plugin/wasm.rs is compiled
 # and PluginManager::load_all instantiates plugins with `runtime = "wasm"`
 # in their plugin.toml. Off by default until the host API surface stabilises.
 plugin-runtime = ["dep:wasmtime"]
+# SFTP upload destination. Adds russh + russh-sftp (pure-rust SSH). default-on;
+# can be disabled with --no-default-features to skip the SSH stack entirely.
+sftp = ["dep:russh", "dep:russh-sftp", "dep:async-trait"]
 
 [dependencies]
 # GUI shell. tauri-runtime-wry 2.9.x has a Send+Sync mismatch with current wry
@@ -96,8 +99,14 @@ wasmtime = { version = "43", default-features = false, features = ["cranelift", 
 sha2 = "0.10"
 hex = "0.4"
 
-# Upload destinations: FTP (SFTP planned, currently out of tree)
+# Upload destinations: FTP via suppaftp, SFTP via russh under the `sftp`
+# feature. russh is pure-rust, so no nasm/perl/openssl-sys compilation on
+# Windows — adding it pulls in tokio (already a dep) and ed25519/aes/etc
+# pure-rust crypto crates.
 suppaftp = { version = "6.0", features = ["native-tls"] }
+russh = { version = "0.49", optional = true }
+russh-sftp = { version = "2", optional = true }
+async-trait = { version = "0.1", optional = true }
 
 # HDR-preserved output (Phase 10 will add JXL/AVIF; pure-rust PNG cICP is fine here)
 png = "0.17"

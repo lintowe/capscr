@@ -6,6 +6,20 @@ format follows [keep-a-changelog](https://keepachangelog.com/en/1.1.0/) loosely.
 
 nothing pending. drop ideas in github issues.
 
+## [0.3.46] — 2026-05-22
+
+### added
+- SFTP upload destination behind a new `sftp` cargo feature (default-on). pure-rust transport via russh + russh-sftp, no nasm/openssl-sys/libssh2 C compilation. backed by tokio's current-thread runtime inside the otherwise-blocking upload pipeline
+- `SftpUploadConfig` mirrors `FtpUploadConfig`'s shape — host/port/username/remote_dir/public_url_template plus password (legacy) + password_encrypted (DPAPI vault, same treatment as the FTP path shipped in 0.3.43)
+- `UploadDestination::Sftp` + `TaskUploadTarget::Sftp` so SFTP is selectable as the global destination AND as a per-task override
+- tray "Upload destination" submenu now lists SFTP alongside Imgur/Custom/FTP and respects the active marker
+- Destinations view: new "sftp (ssh)" panel mirroring the FTP form, with DPAPI placeholder hint when a vault blob is present
+- `Config::migrate_secrets` now wraps the SFTP password too on first save after upgrade; load-time auto-migration triggers when either FTP or SFTP has a plaintext slot but no encrypted blob
+
+### changed
+- default cargo feature set now includes `sftp`. opt out with `--no-default-features` for the smallest possible binary (the `upload_sftp` shim returns a friendly "not compiled in" error in that build)
+- server host-key policy on first connect: accept-any (matches the FTP path's "trust the configured host" stance). a known-host pin store is queued for a follow-up release — until then SFTP users who care about MITM should tunnel via a trusted network
+
 ## [0.3.45] — 2026-05-22
 
 ### fixed

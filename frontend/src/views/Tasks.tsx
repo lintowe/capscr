@@ -26,6 +26,7 @@ const UPLOAD_TARGETS: NonNullable<CaptureTask["target_destination"]>[] = [
   "imgur",
   "custom",
   "ftp",
+  "sftp",
 ];
 
 export function Tasks() {
