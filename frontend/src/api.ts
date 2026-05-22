@@ -48,14 +48,27 @@ export interface FtpConfig {
   public_url_template: string;
 }
 
+export interface SftpConfig {
+  host: string;
+  port: number;
+  username: string;
+  /** plaintext password — same vault treatment as FtpConfig.password */
+  password: string;
+  /** DPAPI-wrapped hex blob */
+  password_encrypted: string;
+  remote_dir: string;
+  public_url_template: string;
+}
+
 export interface UploadConfig {
-  destination: "Imgur" | "Custom" | "Ftp";
+  destination: "Imgur" | "Custom" | "Ftp" | "Sftp";
   copy_url_to_clipboard: boolean;
   custom_url: string;
   custom_form_name: string;
   custom_response_path: string;
   imgur_client_id: string;
   ftp: FtpConfig;
+  sftp: SftpConfig;
 }
 
 export interface UiConfig {
@@ -79,7 +92,7 @@ export interface CaptureTask {
     | "save-and-clipboard"
     | "open-editor"
     | "prompt";
-  target_destination?: "imgur" | "custom" | "ftp" | null;
+  target_destination?: "imgur" | "custom" | "ftp" | "sftp" | null;
 }
 
 export interface AppConfig {

@@ -361,11 +361,18 @@ fn build_tray_menu<R: tauri::Runtime, M: tauri::Manager<R>>(
         true,
         None::<&str>,
     )?;
+    let dest_sftp = MenuItem::with_id(
+        app,
+        "dest_sftp",
+        mark(current_dest == config::UploadDestination::Sftp, "SFTP"),
+        true,
+        None::<&str>,
+    )?;
     let dest_submenu = Submenu::with_items(
         app,
         "Upload destination",
         true,
-        &[&dest_imgur, &dest_custom, &dest_ftp],
+        &[&dest_imgur, &dest_custom, &dest_ftp, &dest_sftp],
     )?;
 
     // --- Open hub (with quick-tab submenu) ---
@@ -546,12 +553,13 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
                     let target = id.trim_start_matches("tab_");
                     let _ = app.emit("capscr://goto-tab", target);
                 }
-                "dest_imgur" | "dest_custom" | "dest_ftp" => {
+                "dest_imgur" | "dest_custom" | "dest_ftp" | "dest_sftp" => {
                     let st = app.state::<state::AppState>();
                     let new_dest = match id {
                         "dest_imgur" => config::UploadDestination::Imgur,
                         "dest_custom" => config::UploadDestination::Custom,
-                        _ => config::UploadDestination::Ftp,
+                        "dest_ftp" => config::UploadDestination::Ftp,
+                        _ => config::UploadDestination::Sftp,
                     };
                     {
                         let mut cfg = st.config.lock().unwrap();

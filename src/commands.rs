@@ -404,6 +404,17 @@ fn build_ftp_service(config: &Config) -> UploadService {
     })
 }
 
+fn build_sftp_service(config: &Config) -> UploadService {
+    UploadService::Sftp(crate::upload::SftpTarget {
+        host: config.upload.sftp.host.clone(),
+        port: config.upload.sftp.port,
+        username: config.upload.sftp.username.clone(),
+        password: config.upload.sftp.password_plaintext(),
+        remote_dir: config.upload.sftp.remote_dir.clone(),
+        public_url_template: config.upload.sftp.public_url_template.clone(),
+    })
+}
+
 fn build_imgur_service(config: &Config) -> UploadService {
     let cid = config.upload.imgur_client_id.trim();
     if cid.is_empty() || cid == "546c25a59c58ad7" {
@@ -434,6 +445,7 @@ fn build_upload_service_for_target(
                 response_url_path: config.upload.custom_response_path.clone(),
             }),
             UploadDestination::Ftp => build_ftp_service(config),
+            UploadDestination::Sftp => build_sftp_service(config),
         },
         Some(TaskUploadTarget::Imgur) => build_imgur_service(config),
         Some(TaskUploadTarget::Custom) => UploadService::Custom(CustomUploader {
@@ -443,6 +455,7 @@ fn build_upload_service_for_target(
             response_url_path: config.upload.custom_response_path.clone(),
         }),
         Some(TaskUploadTarget::Ftp) => build_ftp_service(config),
+        Some(TaskUploadTarget::Sftp) => build_sftp_service(config),
     }
 }
 

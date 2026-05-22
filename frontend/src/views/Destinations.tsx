@@ -65,6 +65,7 @@ export function Destinations() {
                     <option value="Imgur">imgur (anonymous)</option>
                     <option value="Custom">custom http</option>
                     <option value="Ftp">ftp / ftps</option>
+                    <option value="Sftp">sftp (ssh)</option>
                   </select>
                 </div>
               </div>
@@ -241,6 +242,126 @@ export function Destinations() {
                           ...c().upload,
                           ftp: {
                             ...c().upload.ftp,
+                            public_url_template: e.currentTarget.value,
+                          },
+                        })
+                      }
+                    />
+                    <span class="field-hint">
+                      {`{filename} → basename, empty = no url returned`}
+                    </span>
+                  </div>
+                </div>
+              </Section>
+            </Show>
+
+            <Show when={c().upload.destination === "Sftp"}>
+              <Section title="sftp (ssh)">
+                <div class="field">
+                  <label class="field-label">host</label>
+                  <div class="field-control">
+                    <input
+                      type="text"
+                      placeholder="sftp.example.com"
+                      value={c().upload.sftp.host}
+                      onInput={(e) =>
+                        patch({
+                          ...c().upload,
+                          sftp: { ...c().upload.sftp, host: e.currentTarget.value },
+                        })
+                      }
+                    />
+                  </div>
+                </div>
+                <div class="field">
+                  <label class="field-label">port</label>
+                  <div class="field-control">
+                    <input
+                      type="number"
+                      min={1}
+                      max={65535}
+                      value={c().upload.sftp.port}
+                      onInput={(e) => {
+                        const v = parseInt(e.currentTarget.value);
+                        if (!isNaN(v) && v >= 1 && v <= 65535) {
+                          patch({
+                            ...c().upload,
+                            sftp: { ...c().upload.sftp, port: v },
+                          });
+                        }
+                      }}
+                    />
+                    <span class="field-hint">22 standard ssh</span>
+                  </div>
+                </div>
+                <div class="field">
+                  <label class="field-label">username</label>
+                  <div class="field-control">
+                    <input
+                      type="text"
+                      value={c().upload.sftp.username}
+                      onInput={(e) =>
+                        patch({
+                          ...c().upload,
+                          sftp: { ...c().upload.sftp, username: e.currentTarget.value },
+                        })
+                      }
+                    />
+                  </div>
+                </div>
+                <div class="field">
+                  <label class="field-label">password</label>
+                  <div class="field-control">
+                    <input
+                      type="password"
+                      placeholder={
+                        c().upload.sftp.password_encrypted
+                          ? "(stored — leave blank to keep current)"
+                          : ""
+                      }
+                      value={c().upload.sftp.password}
+                      onInput={(e) =>
+                        patch({
+                          ...c().upload,
+                          sftp: { ...c().upload.sftp, password: e.currentTarget.value },
+                        })
+                      }
+                    />
+                    <span class="field-hint">
+                      {c().upload.sftp.password_encrypted
+                        ? "encrypted at rest with Windows DPAPI (per-user)"
+                        : "encrypted at rest with Windows DPAPI on save"}
+                    </span>
+                  </div>
+                </div>
+                <div class="field">
+                  <label class="field-label">remote dir</label>
+                  <div class="field-control">
+                    <input
+                      type="text"
+                      placeholder="/var/www/uploads"
+                      value={c().upload.sftp.remote_dir}
+                      onInput={(e) =>
+                        patch({
+                          ...c().upload,
+                          sftp: { ...c().upload.sftp, remote_dir: e.currentTarget.value },
+                        })
+                      }
+                    />
+                  </div>
+                </div>
+                <div class="field">
+                  <label class="field-label">public url template</label>
+                  <div class="field-control">
+                    <input
+                      type="text"
+                      placeholder="https://cdn.example.com/{filename}"
+                      value={c().upload.sftp.public_url_template}
+                      onInput={(e) =>
+                        patch({
+                          ...c().upload,
+                          sftp: {
+                            ...c().upload.sftp,
                             public_url_template: e.currentTarget.value,
                           },
                         })

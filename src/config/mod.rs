@@ -103,6 +103,7 @@ pub enum TaskUploadTarget {
     Imgur,
     Custom,
     Ftp,
+    Sftp,
 }
 
 fn default_capture_tasks() -> Vec<CaptureTask> {
@@ -346,6 +347,7 @@ pub enum UploadDestination {
     Imgur,
     Custom,
     Ftp,
+    Sftp,
 }
 
 impl UploadDestination {
@@ -354,6 +356,7 @@ impl UploadDestination {
             UploadDestination::Imgur,
             UploadDestination::Custom,
             UploadDestination::Ftp,
+            UploadDestination::Sftp,
         ]
     }
 
@@ -362,6 +365,7 @@ impl UploadDestination {
             UploadDestination::Imgur => "Imgur",
             UploadDestination::Custom => "Custom HTTP",
             UploadDestination::Ftp => "FTP",
+            UploadDestination::Sftp => "SFTP",
         }
     }
 }
@@ -386,6 +390,8 @@ pub struct UploadConfig {
     pub imgur_client_id: String,
     #[serde(default)]
     pub ftp: FtpUploadConfig,
+    #[serde(default)]
+    pub sftp: SftpUploadConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -425,6 +431,7 @@ impl Default for UploadConfig {
             custom_response_path: String::from("url"),
             imgur_client_id: default_imgur_client_id(),
             ftp: FtpUploadConfig::default(),
+            sftp: SftpUploadConfig::default(),
         }
     }
 }
@@ -476,6 +483,49 @@ impl FtpUploadConfig {
 
 fn default_ftp_port() -> u16 {
     21
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SftpUploadConfig {
+    #[serde(default)]
+    pub host: String,
+    #[serde(default = "default_sftp_port")]
+    pub port: u16,
+    #[serde(default)]
+    pub username: String,
+    /// plaintext password (legacy slot). present for parity with FtpUploadConfig
+    /// so users restoring a hand-edited config don't have to retype credentials;
+    /// migrate_secrets moves any value here into password_encrypted on next save
+    #[serde(default)]
+    pub password: String,
+    /// DPAPI-wrapped password (hex-encoded). bound to the current user account
+    /// — copying config.toml to another machine makes this unrecoverable
+    #[serde(default)]
+    pub password_encrypted: String,
+    #[serde(default)]
+    pub remote_dir: String,
+    #[serde(default)]
+    pub public_url_template: String,
+}
+
+impl SftpUploadConfig {
+    pub fn password_plaintext(&self) -> String {
+        if !self.password_encrypted.is_empty() {
+            match crate::secret::decrypt(&self.password_encrypted) {
+                Ok(p) => return p,
+                Err(e) => {
+                    tracing::warn!(
+                        "SFTP password decrypt failed (corrupt blob or wrong user?): {e}"
+                    );
+                }
+            }
+        }
+        self.password.clone()
+    }
+}
+
+fn default_sftp_port() -> u16 {
+    22
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -840,8 +890,10 @@ impl Config {
                         // plaintext FTP password is set but the encrypted slot
                         // is empty, wrap it now and persist. The user never
                         // sees their cleartext password on disk again.
-                        let needs_secret_migration = !config.upload.ftp.password.is_empty()
-                            && config.upload.ftp.password_encrypted.is_empty();
+                        let needs_secret_migration = (!config.upload.ftp.password.is_empty()
+                            && config.upload.ftp.password_encrypted.is_empty())
+                            || (!config.upload.sftp.password.is_empty()
+                                && config.upload.sftp.password_encrypted.is_empty());
                         if needs_secret_migration {
                             config.migrate_secrets();
                             if let Err(e) = config.save() {
@@ -917,6 +969,21 @@ impl Config {
                 Err(e) => {
                     tracing::warn!(
                         "FTP password DPAPI encrypt failed; leaving plaintext: {e}"
+                    );
+                }
+            }
+        }
+        let sftp = &mut self.upload.sftp;
+        if !sftp.password.is_empty() && sftp.password_encrypted.is_empty() {
+            match crate::secret::encrypt(&sftp.password) {
+                Ok(blob) => {
+                    sftp.password_encrypted = blob;
+                    sftp.password.clear();
+                    tracing::info!("migrated SFTP password into encrypted vault");
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "SFTP password DPAPI encrypt failed; leaving plaintext: {e}"
                     );
                 }
             }
