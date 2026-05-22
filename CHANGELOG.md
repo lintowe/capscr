@@ -6,6 +6,16 @@ format follows [keep-a-changelog](https://keepachangelog.com/en/1.1.0/) loosely.
 
 nothing pending. drop ideas in github issues.
 
+## [0.3.50] — 2026-05-22
+
+### added
+- "fire" button next to each task in the Tasks view. invokes the same `trigger_task` pipeline a hotkey press would, so users can dry-run a binding without leaving the hub. especially useful for PrintScreen and other keys that are awkward to press while focused on the hub window, and for tasks bound during a tray-disabled session
+- new `fire_task` invoke; hides the hub before dispatch so a region/window capture overlay isn't painted over by the focused hub
+- button respects `configDirty()` — disabled while there are unsaved changes, since the backend looks up tasks by id in the persisted config (firing an unsaved task would 404)
+
+### changed
+- Tasks view actions row now has two buttons (fire + delete) with the same xs-ghost styling
+
 ## [0.3.49] — 2026-05-22
 
 ### added

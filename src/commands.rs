@@ -1819,6 +1819,20 @@ pub struct ConnectionTestReport {
     pub steps: Vec<crate::upload::TestStep>,
 }
 
+// invoke wrapper around trigger_task so the hub UI can dry-run a task
+// without the user needing to press its hotkey. hides the hub window first
+// because a region/window capture overlay launched from a focused hub paints
+// over its own selector and looks broken. tray-driven captures already get
+// this for free via the existing hub.hide path; this matches the behaviour.
+#[tauri::command]
+pub fn fire_task(task_id: String, app: AppHandle) -> Result<(), String> {
+    if let Some(hub) = app.get_webview_window(HUB_LABEL) {
+        let _ = hub.hide();
+    }
+    trigger_task(&app, &task_id);
+    Ok(())
+}
+
 #[tauri::command]
 pub fn test_upload_connection(
     destination: String,

@@ -1,6 +1,6 @@
 import { createResource, createSignal, For, onCleanup, Show } from "solid-js";
 import { listen } from "@tauri-apps/api/event";
-import { Plus, Save, Trash2 } from "lucide-solid";
+import { Plus, Save, Trash2, Zap } from "lucide-solid";
 import { api, AppConfig, CaptureTask, HotkeyDiagnostics } from "../api";
 import { configDirty, setConfigDirty } from "../dirty";
 import { HotkeyInput } from "../components/HotkeyInput";
@@ -319,6 +319,27 @@ export function Tasks() {
                       </div>
 
                       <div class="list-item-actions">
+                        <button
+                          class="btn"
+                          data-variant="ghost"
+                          data-size="xs"
+                          disabled={configDirty()}
+                          title={
+                            configDirty()
+                              ? "save first — fire uses the persisted task definition"
+                              : "run this task now (same path as pressing its hotkey)"
+                          }
+                          onClick={() => {
+                            api
+                              .fireTask(task.id)
+                              .catch((e) =>
+                                setStatus({ tone: "err", msg: `fire: ${e}` }),
+                              );
+                          }}
+                        >
+                          <Zap size={11} stroke-width={1.5} />
+                          fire
+                        </button>
                         <button
                           class="btn"
                           data-variant="ghost"
