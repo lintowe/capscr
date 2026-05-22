@@ -203,6 +203,7 @@ fn main() {
             commands::sftp_known_hosts,
             commands::sftp_forget_host,
             commands::test_upload_connection,
+            commands::fire_task,
         ])
         .build(tauri::generate_context!())
         .expect("error while building capscr")

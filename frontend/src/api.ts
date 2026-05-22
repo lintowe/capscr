@@ -221,4 +221,5 @@ export const api = {
     invoke<boolean>("sftp_forget_host", { hostPort }),
   testUploadConnection: (destination: "Ftp" | "Sftp") =>
     invoke<ConnectionTestReport>("test_upload_connection", { destination }),
+  fireTask: (taskId: string) => invoke<void>("fire_task", { taskId }),
 };
