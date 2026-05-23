@@ -139,13 +139,10 @@ const MAX_CAPTURE_PIXELS: u64 = 256 * 1024 * 1024;
 
 impl Capture for ScreenCapture {
     fn capture(&self) -> Result<RgbaImage> {
-        if HdrCapture::is_hdr_available() {
-            let hdr = HdrCapture::new();
-            if let Ok(img) = hdr.capture() {
-                return Ok(img);
-            }
-        }
-
+        // HdrCapture path disabled — see src/capture/region.rs for the
+        // reasoning. GDI BitBlt path keeps captures instant; HDR content
+        // is overblown but visible until a GPU-shader tonemap lands.
+        let _ = HdrCapture::is_hdr_available;
         let monitor = self.find_monitor()?;
         let img = monitor.capture_image()?;
 

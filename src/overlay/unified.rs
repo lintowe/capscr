@@ -228,20 +228,16 @@ mod windows_impl {
             let screen_dc = GetDC(None);
             let mem_dc = CreateCompatibleDC(screen_dc);
             if !mem_dc.is_invalid() {
-                // On HDR displays, GDI BitBlt of the desktop clips bright
-                // (>80nit) pixels to pure white because GDI only sees the
-                // SDR-tonemapped frame. Use the DXGI HDR capture path
-                // instead so the overlay preview matches what the user
-                // actually sees on screen. Falls back to GDI on SDR or
-                // on any HDR capture error.
-                let (bitmap, needs_bitblt) = if crate::capture::HdrCapture::is_hdr_available() {
-                    match capture_virtual_screen_hdr_to_dib(virt_x, virt_y, virt_width, virt_height) {
-                        Some(bmp) => (bmp, false),
-                        None => (CreateCompatibleBitmap(screen_dc, virt_width, virt_height), true),
-                    }
-                } else {
-                    (CreateCompatibleBitmap(screen_dc, virt_width, virt_height), true)
-                };
+                // HDR-aware preview disabled — the DXGI desktop duplication
+                // path added multi-second latency to overlay open on HDR
+                // setups and on some configurations produced zeroed
+                // textures. fall back to GDI BitBlt unconditionally: HDR
+                // pixels read as overblown in the preview, matching what
+                // the saved capture looks like.
+                let (bitmap, needs_bitblt) = (
+                    CreateCompatibleBitmap(screen_dc, virt_width, virt_height),
+                    true,
+                );
                 if !bitmap.is_invalid() {
                     let old_bitmap = SelectObject(mem_dc, bitmap);
                     if needs_bitblt {
