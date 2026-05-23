@@ -3,7 +3,7 @@ use image::RgbaImage;
 use xcap::Monitor;
 
 use super::hdr::HdrCapture;
-use super::{hdr_aware_enabled, Capture, Rectangle};
+use super::{hdr_aware_enabled, orient_captured_image, Capture, Rectangle};
 
 pub struct RegionCapture {
     region: Rectangle,
@@ -99,6 +99,13 @@ impl Capture for RegionCapture {
             };
 
             if let Ok(img) = img_result {
+                let img = orient_captured_image(
+                    img,
+                    monitor.width(),
+                    monitor.height(),
+                    monitor.x(),
+                    monitor.y(),
+                );
                 let offset_x = (monitor.x() - min_x) as u32;
                 let offset_y = (monitor.y() - min_y) as u32;
 

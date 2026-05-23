@@ -152,6 +152,13 @@ impl Capture for ScreenCapture {
         }
         let monitor = self.find_monitor()?;
         let img = monitor.capture_image()?;
+        let img = super::orient_captured_image(
+            img,
+            monitor.width(),
+            monitor.height(),
+            monitor.x(),
+            monitor.y(),
+        );
 
         if img.width() > MAX_CAPTURE_DIMENSION || img.height() > MAX_CAPTURE_DIMENSION {
             return Err(anyhow!("Captured image dimensions exceed safety limit"));
