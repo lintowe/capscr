@@ -584,21 +584,44 @@ mod windows_hdr {
             let mut frame_info = DXGI_OUTDUPL_FRAME_INFO::default();
             let mut desktop_resource: Option<IDXGIResource> = None;
 
+            // DXGI Desktop Duplication's first AcquireNextFrame after a
+            // freshly-created IDXGIOutputDuplication often returns a stale
+            // or empty frame — LastPresentTime=0 and AccumulatedFrames=0.
+            // accepting it gives back an all-zero raw_data buffer (that's
+            // what produced the all-black HDR screenshots in 0.3.55-0.3.57).
+            // loop until we see a frame with either a real present time or
+            // an accumulated update, releasing each stale one back to the
+            // duplication so the next call returns the next pipeline slot.
             let mut acquired = false;
-            for attempt in 0..10 {
-                match duplication.AcquireNextFrame(100, &mut frame_info, &mut desktop_resource) {
+            for attempt in 0..30 {
+                let res = duplication.AcquireNextFrame(
+                    250,
+                    &mut frame_info,
+                    &mut desktop_resource,
+                );
+                match res {
                     Ok(()) => {
-                        acquired = true;
-                        break;
+                        let real_frame = frame_info.LastPresentTime != 0
+                            || frame_info.AccumulatedFrames > 0
+                            || (attempt >= 5 && desktop_resource.is_some());
+                        if real_frame {
+                            acquired = true;
+                            break;
+                        }
+                        // stale prime frame — release and retry. ReleaseFrame
+                        // is required after every successful AcquireNextFrame.
+                        let _ = duplication.ReleaseFrame();
+                        desktop_resource = None;
+                        std::thread::sleep(std::time::Duration::from_millis(16));
                     }
-                    Err(e) if e.code() == DXGI_ERROR_ACCESS_LOST && attempt < 9 => {
+                    Err(e) if e.code() == DXGI_ERROR_ACCESS_LOST && attempt < 29 => {
                         if let Ok(fresh) = output1.DuplicateOutput(&device) {
                             duplication = fresh;
                         }
                         std::thread::sleep(std::time::Duration::from_millis(100));
                     }
                     Err(e) if e.code() == DXGI_ERROR_WAIT_TIMEOUT => {
-                        std::thread::sleep(std::time::Duration::from_millis(50));
+                        std::thread::sleep(std::time::Duration::from_millis(16));
                     }
                     Err(_) => {
                         std::thread::sleep(std::time::Duration::from_millis(50));
@@ -608,9 +631,15 @@ mod windows_hdr {
 
             if !acquired {
                 return Err(anyhow!(
-                    "Failed to acquire HDR frame after 10 attempts — display may be sleeping"
+                    "Failed to acquire HDR frame after 30 attempts — display may be sleeping or no recent updates"
                 ));
             }
+
+            tracing::info!(
+                "capture_hdr_screen: acquired frame with last_present_time={} accumulated_frames={}",
+                frame_info.LastPresentTime,
+                frame_info.AccumulatedFrames,
+            );
 
             let _frame_guard = FrameGuard { duplication: &duplication, acquired: true };
 

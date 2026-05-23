@@ -2,7 +2,23 @@ use anyhow::{anyhow, Result};
 use image::RgbaImage;
 use xcap::Monitor;
 
+use super::hdr::HdrCapture;
 use super::{Capture, Rectangle};
+
+// CAPSCR_HDR_AWARE=1 in the environment re-enables the DXGI Desktop
+// Duplication + tonemap path that was disabled in 0.3.58 after producing
+// zeroed textures on real user setups. cached at startup so per-capture
+// cost is one atomic load. unset/0 keeps the fast GDI BitBlt default —
+// what 0.3.49 and 0.3.58 shipped.
+fn hdr_aware_enabled() -> bool {
+    use std::sync::OnceLock;
+    static GATE: OnceLock<bool> = OnceLock::new();
+    *GATE.get_or_init(|| {
+        std::env::var("CAPSCR_HDR_AWARE")
+            .map(|v| matches!(v.trim(), "1" | "true" | "TRUE" | "on"))
+            .unwrap_or(false)
+    })
+}
 
 pub struct RegionCapture {
     region: Rectangle,
@@ -61,10 +77,31 @@ impl Capture for RegionCapture {
         let total_width = (max_x - min_x) as u32;
         let total_height = (max_y - min_y) as u32;
 
+        let use_hdr = hdr_aware_enabled() && HdrCapture::is_hdr_available();
         let mut combined = RgbaImage::new(total_width, total_height);
 
         for monitor in &monitors {
-            if let Ok(img) = monitor.capture_image() {
+            let img_result: Result<RgbaImage> = if use_hdr {
+                let center = (
+                    monitor.x() + (monitor.width() as i32) / 2,
+                    monitor.y() + (monitor.height() as i32) / 2,
+                );
+                HdrCapture::new()
+                    .capture_with_hdr_at(Some(center))
+                    .map(|(img, _)| img)
+                    .or_else(|e| {
+                        tracing::warn!(
+                            "HDR-aware capture failed for monitor at {},{} — GDI fallback: {e:#}",
+                            monitor.x(),
+                            monitor.y(),
+                        );
+                        monitor.capture_image().map_err(|e| anyhow!("{e}"))
+                    })
+            } else {
+                monitor.capture_image().map_err(|e| anyhow!("{e}"))
+            };
+
+            if let Ok(img) = img_result {
                 let offset_x = (monitor.x() - min_x) as u32;
                 let offset_y = (monitor.y() - min_y) as u32;
 
