@@ -53,6 +53,118 @@ pub trait Capture {
     fn capture(&self) -> Result<RgbaImage>;
 }
 
+// Rotate a freshly-captured monitor image to match the orientation Windows
+// reports for that monitor. DXGI Desktop Duplication and GDI BitBlt both
+// hand back the framebuffer in its NATIVE (unrotated) orientation; if the
+// user has set the monitor to Portrait in display settings, that means a
+// 1920x1080-native panel gives us a 1920x1080 image while monitor.width()
+// reports 1080 and monitor.height() reports 1920. compositing the native
+// image into the rotated virtual-screen slot crops it and visually rotates
+// it 90° in the saved PNG. fix: if captured dimensions are swapped vs the
+// reported monitor dimensions, rotate the image to match.
+//
+// expected_w/h are what monitor.width()/height() report (post-rotation).
+#[cfg(windows)]
+pub fn orient_captured_image(
+    img: RgbaImage,
+    expected_w: u32,
+    expected_h: u32,
+    monitor_x: i32,
+    monitor_y: i32,
+) -> RgbaImage {
+    let (iw, ih) = (img.width(), img.height());
+    if iw == expected_w && ih == expected_h {
+        return img;
+    }
+    if iw == expected_h && ih == expected_w {
+        // dimensions swapped — monitor is in portrait. query the actual
+        // rotation so we know whether to spin 90° or 270°.
+        let rotation = current_monitor_rotation_at(monitor_x, monitor_y);
+        let rotated = match rotation {
+            MonitorRotation::Rotate90 => image::imageops::rotate90(&img),
+            MonitorRotation::Rotate270 => image::imageops::rotate270(&img),
+            // unknown or 180° (which preserves dimensions): default to 270°
+            // because that's the most common physical-portrait orientation
+            // for desktop monitors mounted on a stand.
+            _ => image::imageops::rotate270(&img),
+        };
+        tracing::info!(
+            "orient_captured_image: captured {iw}x{ih}, expected {expected_w}x{expected_h}, applied {:?}",
+            rotation,
+        );
+        return rotated;
+    }
+    if iw == expected_w && ih == expected_h * 2 {
+        // dimensions doubled vertically (some xcap quirk on certain
+        // configurations); take the top half.
+        return image::imageops::crop_imm(&img, 0, 0, iw, expected_h).to_image();
+    }
+    tracing::warn!(
+        "orient_captured_image: captured {iw}x{ih} doesn't match expected {expected_w}x{expected_h} and isn't a swap — passing through unchanged",
+    );
+    img
+}
+
+#[cfg(not(windows))]
+pub fn orient_captured_image(
+    img: RgbaImage,
+    _expected_w: u32,
+    _expected_h: u32,
+    _monitor_x: i32,
+    _monitor_y: i32,
+) -> RgbaImage {
+    img
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MonitorRotation {
+    Identity,
+    Rotate90,
+    Rotate180,
+    Rotate270,
+    Unknown,
+}
+
+#[cfg(windows)]
+fn current_monitor_rotation_at(x: i32, y: i32) -> MonitorRotation {
+    use windows::Win32::Foundation::POINT;
+    use windows::Win32::Graphics::Gdi::{
+        EnumDisplaySettingsW, GetMonitorInfoW, MonitorFromPoint, DEVMODEW,
+        ENUM_CURRENT_SETTINGS, MONITORINFOEXW, MONITOR_DEFAULTTONULL,
+    };
+    unsafe {
+        let hmon = MonitorFromPoint(POINT { x, y }, MONITOR_DEFAULTTONULL);
+        if hmon.is_invalid() {
+            return MonitorRotation::Unknown;
+        }
+        let mut info = MONITORINFOEXW::default();
+        info.monitorInfo.cbSize = std::mem::size_of::<MONITORINFOEXW>() as u32;
+        if !GetMonitorInfoW(hmon, &mut info.monitorInfo as *mut _).as_bool() {
+            return MonitorRotation::Unknown;
+        }
+        let mut devmode = DEVMODEW::default();
+        devmode.dmSize = std::mem::size_of::<DEVMODEW>() as u16;
+        let ok = EnumDisplaySettingsW(
+            windows::core::PCWSTR(info.szDevice.as_ptr()),
+            ENUM_CURRENT_SETTINGS,
+            &mut devmode,
+        );
+        if !ok.as_bool() {
+            return MonitorRotation::Unknown;
+        }
+        // dmDisplayOrientation lives in the Anonymous2 union inside DEVMODEW.
+        let orient = devmode.Anonymous1.Anonymous2.dmDisplayOrientation;
+        // DMDO_DEFAULT = 0, DMDO_90 = 1, DMDO_180 = 2, DMDO_270 = 3
+        match orient.0 {
+            0 => MonitorRotation::Identity,
+            1 => MonitorRotation::Rotate90,
+            2 => MonitorRotation::Rotate180,
+            3 => MonitorRotation::Rotate270,
+            _ => MonitorRotation::Unknown,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CaptureMode {
     FullScreen,
