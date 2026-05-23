@@ -149,6 +149,14 @@ impl HdrCapture {
             }
 
             let sdr_white = hdr_info.sdr_white_level.max(80.0);
+            tracing::info!(
+                "capture_with_hdr_at: passing sdr_white={:.0}nits to tonemap (raw_data {}B, {}x{}, {:?})",
+                sdr_white,
+                raw_data.len(),
+                width,
+                height,
+                format,
+            );
             let sdr_img = self.tonemap(&raw_data, width, height, format, sdr_white);
             let hdr_bitmap = if matches!(format, HdrFormat::Sdr) {
                 None
@@ -205,11 +213,6 @@ impl HdrCapture {
 
         match format {
             HdrFormat::ScRgb => {
-                // DXGI desktop duplication delivers scRGB as R16G16B16A16_FLOAT
-                // (IEEE 754 binary16 half-floats), 8 bytes per pixel. previously
-                // we expected 16 bytes/pixel (R32G32B32A32) and the length check
-                // returned a blank RgbaImage for every HDR capture — that's
-                // what produced the all-black screenshot in 0.3.54.
                 let expected_bytes = pixel_count.saturating_mul(8);
                 if raw_data.len() < expected_bytes {
                     tracing::warn!(
@@ -219,6 +222,31 @@ impl HdrCapture {
                     );
                     return RgbaImage::new(width, height);
                 }
+                // diagnostic: count non-zero bytes in raw_data so we can
+                // distinguish "GPU handed us a zeroed texture" from "my
+                // half-float decode is wrong". elevated to info for 0.3.57
+                // and demoted once HDR captures are visually confirmed.
+                let scan_len = expected_bytes.min(1 << 20);
+                let nonzero = raw_data[..scan_len].iter().filter(|b| **b != 0).count();
+                let first_nonzero_offset = raw_data[..expected_bytes]
+                    .iter()
+                    .position(|b| *b != 0)
+                    .map(|o| o as i64)
+                    .unwrap_or(-1);
+                let bytes_dump: String = raw_data[..32.min(expected_bytes)]
+                    .iter()
+                    .map(|b| format!("{:02x}", b))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                tracing::info!(
+                    "scrgb raw: total={}B, nonzero_in_first_{}MB={} first_nonzero_byte_offset={} first32B=[{}]",
+                    expected_bytes,
+                    scan_len / (1 << 20),
+                    nonzero,
+                    first_nonzero_offset,
+                    bytes_dump,
+                );
+
                 let float_data: Vec<f32> = raw_data[..expected_bytes]
                     .chunks_exact(2)
                     .map(|chunk| {
