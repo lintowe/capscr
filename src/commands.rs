@@ -482,14 +482,10 @@ fn build_upload_service_for_target(
 // hardcoded and surprised multi-display users.
 fn capture_active_monitor_with_hdr(
 ) -> anyhow::Result<(RgbaImage, Option<crate::capture::HdrBitmap>)> {
-    use crate::capture::HdrCapture;
+    // HdrCapture path disabled — see src/capture/region.rs for the
+    // reasoning. GDI BitBlt path is fast; HDR content reads as overblown
+    // but the alternative was multi-second delays and zeroed textures.
     let target = cursor_position();
-    if HdrCapture::is_hdr_available() {
-        let hdr = HdrCapture::new();
-        if let Ok(pair) = hdr.capture_with_hdr_at(target) {
-            return Ok(pair);
-        }
-    }
     let capture = match target {
         Some((x, y)) => ScreenCapture::at_point(x, y).unwrap_or_else(|_| {
             ScreenCapture::primary().unwrap_or_else(|_| ScreenCapture::new())
