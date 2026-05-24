@@ -24,6 +24,7 @@ use windows::Win32::Graphics::Direct3D11::{
     D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING,
 };
 use windows::Win32::Graphics::Dxgi::IDXGIDevice;
+use windows::Win32::Foundation::HWND;
 use windows::Win32::Graphics::Gdi::HMONITOR;
 use windows::Win32::System::WinRT::Direct3D11::{
     CreateDirect3D11DeviceFromDXGIDevice, IDirect3DDxgiInterfaceAccess,
@@ -45,16 +46,32 @@ pub fn capture_at_point(x: i32, y: i32) -> Result<RgbaImage> {
     capture_monitor(hmon)
 }
 
+pub fn capture_window(hwnd: HWND) -> Result<RgbaImage> {
+    unsafe {
+        let interop: IGraphicsCaptureItemInterop =
+            windows::core::factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>()
+                .map_err(|e| anyhow!("get IGraphicsCaptureItemInterop: {e}"))?;
+        let item: GraphicsCaptureItem = interop
+            .CreateForWindow(hwnd)
+            .map_err(|e| anyhow!("CreateForWindow: {e}"))?;
+        capture_item(item)
+    }
+}
+
 pub fn capture_monitor(hmonitor: HMONITOR) -> Result<RgbaImage> {
     unsafe {
-        // 1. capture item for the monitor. requires the interop interface
-        //    on the GraphicsCaptureItem ABI.
         let interop: IGraphicsCaptureItemInterop =
             windows::core::factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>()
                 .map_err(|e| anyhow!("get IGraphicsCaptureItemInterop: {e}"))?;
         let item: GraphicsCaptureItem = interop
             .CreateForMonitor(hmonitor)
             .map_err(|e| anyhow!("CreateForMonitor: {e}"))?;
+        capture_item(item)
+    }
+}
+
+fn capture_item(item: GraphicsCaptureItem) -> Result<RgbaImage> {
+    unsafe {
         let size = item.Size().map_err(|e| anyhow!("item.Size: {e}"))?;
         if size.Width <= 0 || size.Height <= 0 {
             return Err(anyhow!("monitor item has zero size"));
