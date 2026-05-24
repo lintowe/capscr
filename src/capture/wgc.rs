@@ -210,21 +210,37 @@ fn capture_item(item: GraphicsCaptureItem) -> Result<RgbaImage> {
 
         // 7. swap BGRA → RGBA on the way out. WGC delivers B8G8R8A8 in
         //    little-endian order (B in byte 0, G in 1, R in 2, A in 3);
-        //    image::RgbaImage expects RGBA.
+        //    image::RgbaImage expects RGBA. parallelized across CPU cores
+        //    because in debug builds the 8M-pixel per-byte loop was
+        //    dominating capture time (~2s out of 3s for a 4K frame).
         let pixel_count = (width as usize) * (height as usize);
         let mut rgba = vec![0u8; pixel_count * 4];
-        for y in 0..(height as usize) {
-            let src_row = src_ptr.add(y * row_pitch);
-            let dst_row_offset = y * row_bytes;
-            for x in 0..(width as usize) {
-                let s = src_row.add(x * 4);
-                let d = dst_row_offset + x * 4;
-                rgba[d]     = *s.add(2); // R from byte 2
-                rgba[d + 1] = *s.add(1); // G from byte 1
-                rgba[d + 2] = *s.add(0); // B from byte 0
-                rgba[d + 3] = *s.add(3); // A from byte 3
+        let thread_count = std::thread::available_parallelism()
+            .map(|n| n.get().min(16))
+            .unwrap_or(4)
+            .max(1);
+        let rows_per_chunk = (height as usize).div_ceil(thread_count);
+        let src_addr = src_ptr as usize; // raw addr is Send; pointer isn't
+        std::thread::scope(|s| {
+            for (chunk_idx, dst_chunk) in rgba.chunks_mut(rows_per_chunk * row_bytes).enumerate() {
+                let start_row = chunk_idx * rows_per_chunk;
+                s.spawn(move || {
+                    let rows = dst_chunk.len() / row_bytes;
+                    for r in 0..rows {
+                        let y = start_row + r;
+                        let src = (src_addr + y * row_pitch) as *const u8;
+                        let dst_row = &mut dst_chunk[r * row_bytes..(r + 1) * row_bytes];
+                        for x in 0..(width as usize) {
+                            let off = x * 4;
+                            dst_row[off]     = *src.add(off + 2);
+                            dst_row[off + 1] = *src.add(off + 1);
+                            dst_row[off + 2] = *src.add(off);
+                            dst_row[off + 3] = *src.add(off + 3);
+                        }
+                    }
+                });
             }
-        }
+        });
 
         // 8. cleanup. closing the session + pool is critical or WGC will
         //    leak GPU resources and the next capture-active border will
