@@ -73,15 +73,13 @@ impl Capture for RegionCapture {
         //      (instant, OS-side tonemap, matches Snipping Tool quality)
         //   3. default -> GDI BitBlt via xcap (instant, overblown on HDR)
         let env_on = hdr_aware_enabled();
+        let wgc_on = super::wgc_enabled();
         let hdr_avail = HdrCapture::is_hdr_available();
         let use_cpu_hdr = env_on && hdr_avail;
-        let use_wgc = !env_on && hdr_avail;
+        let use_wgc = wgc_on && !env_on;
         tracing::info!(
-            "RegionCapture: env_on={} hdr_avail={} -> cpu_hdr={} wgc={}",
-            env_on,
-            hdr_avail,
-            use_cpu_hdr,
-            use_wgc,
+            "RegionCapture: cpu_hdr_env={} wgc_env={} hdr_avail={} -> cpu_hdr={} wgc={}",
+            env_on, wgc_on, hdr_avail, use_cpu_hdr, use_wgc,
         );
 
         // selection bounds in virtual-screen coords. used to skip monitors

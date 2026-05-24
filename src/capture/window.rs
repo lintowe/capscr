@@ -87,6 +87,7 @@ impl Capture for WindowCapture {
         #[cfg(windows)]
         {
             let env_on = super::hdr_aware_enabled();
+            let wgc_on = super::wgc_enabled();
             let hdr_avail = super::HdrCapture::is_hdr_available();
             if env_on && hdr_avail {
                 match self_capture_screen_region(self.window_id) {
@@ -96,7 +97,7 @@ impl Capture for WindowCapture {
                     ),
                 }
             }
-            if !env_on && hdr_avail {
+            if wgc_on && !env_on {
                 use windows::Win32::Foundation::HWND;
                 let hwnd = HWND(self.window_id as usize as *mut _);
                 let t0 = std::time::Instant::now();
