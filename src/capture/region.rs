@@ -66,20 +66,23 @@ impl Capture for RegionCapture {
         let total_width = (max_x - min_x) as u32;
         let total_height = (max_y - min_y) as u32;
 
-        // capture path priority:
-        //   1. CAPSCR_HDR_AWARE=1 + HDR display -> custom CPU tonemap
-        //      (slow, gives us control over the look)
-        //   2. HDR display detected -> WGC (Windows.Graphics.Capture)
-        //      (instant, OS-side tonemap, matches Snipping Tool quality)
-        //   3. default -> GDI BitBlt via xcap (instant, overblown on HDR)
+        // capture path priority for HDR-display captures:
+        //   1. CAPSCR_HDR_AWARE=1 -> custom CPU Reinhard tonemap (legacy
+        //      opt-in, slow, tunable)
+        //   2. CAPSCR_USE_WGC=1 -> Windows.Graphics.Capture (OS-side
+        //      tonemap, instant, but can shift SDR brightness)
+        //   3. default + HDR display -> D2D GPU pipeline (correct +
+        //      instant, uses Direct2D HdrToneMap + WhiteLevelAdjustment)
+        //   4. default + SDR display -> GDI BitBlt (instant, pixel-exact)
         let env_on = hdr_aware_enabled();
         let wgc_on = super::wgc_enabled();
         let hdr_avail = HdrCapture::is_hdr_available();
         let use_cpu_hdr = env_on && hdr_avail;
         let use_wgc = wgc_on && !env_on;
+        let use_d2d = hdr_avail && !env_on && !wgc_on;
         tracing::info!(
-            "RegionCapture: cpu_hdr_env={} wgc_env={} hdr_avail={} -> cpu_hdr={} wgc={}",
-            env_on, wgc_on, hdr_avail, use_cpu_hdr, use_wgc,
+            "RegionCapture: cpu_hdr_env={} wgc_env={} hdr_avail={} -> cpu_hdr={} wgc={} d2d={}",
+            env_on, wgc_on, hdr_avail, use_cpu_hdr, use_wgc, use_d2d,
         );
 
         // selection bounds in virtual-screen coords. used to skip monitors
@@ -136,6 +139,21 @@ impl Capture for RegionCapture {
                     ),
                     Err(e) => tracing::warn!(
                         "WGC capture failed at ({},{}) in {dt}ms — GDI fallback: {e:#}",
+                        center.0, center.1
+                    ),
+                }
+                r.or_else(|_| monitor.capture_image().map_err(|e| anyhow!("{e}")))
+            } else if use_d2d {
+                let t0 = std::time::Instant::now();
+                let r = super::d2d_capture_at_point(Some(center));
+                let dt = t0.elapsed().as_millis();
+                match &r {
+                    Ok(img) => tracing::info!(
+                        "D2D capture {}x{} at ({},{}) in {dt}ms",
+                        img.width(), img.height(), center.0, center.1
+                    ),
+                    Err(e) => tracing::warn!(
+                        "D2D capture failed at ({},{}) in {dt}ms — GDI fallback: {e:#}",
                         center.0, center.1
                     ),
                 }

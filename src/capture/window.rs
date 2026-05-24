@@ -97,21 +97,34 @@ impl Capture for WindowCapture {
                     ),
                 }
             }
-            if wgc_on && !env_on {
-                use windows::Win32::Foundation::HWND;
-                let hwnd = HWND(self.window_id as usize as *mut _);
-                let t0 = std::time::Instant::now();
-                match super::wgc::capture_window(hwnd) {
-                    Ok(img) => {
-                        tracing::info!(
-                            "WGC capture (window {}) {}x{} in {}ms",
-                            self.window_id, img.width(), img.height(), t0.elapsed().as_millis()
-                        );
-                        return Ok(img);
+            if hdr_avail {
+                if wgc_on {
+                    use windows::Win32::Foundation::HWND;
+                    let hwnd = HWND(self.window_id as usize as *mut _);
+                    let t0 = std::time::Instant::now();
+                    match super::wgc::capture_window(hwnd) {
+                        Ok(img) => {
+                            tracing::info!(
+                                "WGC capture (window {}) {}x{} in {}ms",
+                                self.window_id, img.width(), img.height(),
+                                t0.elapsed().as_millis()
+                            );
+                            return Ok(img);
+                        }
+                        Err(e) => tracing::warn!(
+                            "WGC window capture failed — fallthrough: {e:#}"
+                        ),
                     }
-                    Err(e) => tracing::warn!(
-                        "WGC window capture failed — GDI fallback: {e:#}"
-                    ),
+                } else {
+                    // D2D path: capture the screen region of the window
+                    // via DXGI + D2D tonemap, then crop to the window's
+                    // DWM frame bounds.
+                    match d2d_window_capture(self.window_id) {
+                        Ok(img) => return Ok(img),
+                        Err(e) => tracing::warn!(
+                            "D2D window capture failed — GDI fallback: {e:#}"
+                        ),
+                    }
                 }
             }
         }
@@ -137,6 +150,68 @@ impl Capture for WindowCapture {
             }
         }
     }
+}
+
+#[cfg(windows)]
+fn d2d_window_capture(hwnd_u32: u32) -> Result<RgbaImage> {
+    // D2D capture is per-monitor; for a window we need to figure out which
+    // monitor the window lives on (via its center), capture that monitor
+    // through the D2D pipeline, then crop to the window's DWM frame bounds
+    // expressed in the captured monitor's local coordinates.
+    use windows::Win32::Foundation::{HWND, POINT, RECT};
+    use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_EXTENDED_FRAME_BOUNDS};
+    use windows::Win32::Graphics::Gdi::{
+        GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONULL,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::GetWindowRect;
+
+    let hwnd = HWND(hwnd_u32 as usize as *mut _);
+    let rect = unsafe {
+        let mut r = RECT::default();
+        let ok = DwmGetWindowAttribute(
+            hwnd,
+            DWMWA_EXTENDED_FRAME_BOUNDS,
+            &mut r as *mut RECT as *mut _,
+            std::mem::size_of::<RECT>() as u32,
+        )
+        .is_ok();
+        if !ok {
+            GetWindowRect(hwnd, &mut r).map_err(|e| anyhow!("GetWindowRect failed: {e}"))?;
+        }
+        r
+    };
+
+    // resolve which monitor + the monitor's origin
+    let (mon_origin_x, mon_origin_y) = unsafe {
+        let hmon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONULL);
+        if hmon.is_invalid() {
+            return Err(anyhow!("MonitorFromWindow returned null"));
+        }
+        let mut mi = MONITORINFO::default();
+        mi.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+        if !GetMonitorInfoW(hmon, &mut mi as *mut _).as_bool() {
+            return Err(anyhow!("GetMonitorInfoW failed"));
+        }
+        (mi.rcMonitor.left, mi.rcMonitor.top)
+    };
+
+    let center = (
+        (rect.left + rect.right) / 2,
+        (rect.top + rect.bottom) / 2,
+    );
+    let full = super::d2d_capture_at_point(Some(center))?;
+
+    // crop window-bounds out of the full monitor capture
+    let local_x = (rect.left - mon_origin_x).max(0) as u32;
+    let local_y = (rect.top - mon_origin_y).max(0) as u32;
+    let crop_w = ((rect.right - rect.left) as u32).min(full.width().saturating_sub(local_x));
+    let crop_h = ((rect.bottom - rect.top) as u32).min(full.height().saturating_sub(local_y));
+    if crop_w == 0 || crop_h == 0 {
+        return Err(anyhow!("D2D window crop has zero size"));
+    }
+    let cropped = image::imageops::crop_imm(&full, local_x, local_y, crop_w, crop_h).to_image();
+    let _ = POINT { x: 0, y: 0 }; // suppress unused
+    Ok(cropped)
 }
 
 #[cfg(windows)]

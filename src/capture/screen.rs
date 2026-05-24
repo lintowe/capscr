@@ -140,14 +140,50 @@ const MAX_CAPTURE_PIXELS: u64 = 256 * 1024 * 1024;
 impl Capture for ScreenCapture {
     fn capture(&self) -> Result<RgbaImage> {
         tracing::info!("ScreenCapture::capture entry");
-        // HDR-aware path, gated by super::hdr_aware_enabled() (default-on,
-        // CAPSCR_HDR_AWARE=0 forces GDI). on any HDR capture error, fall
-        // through to GDI so a hardware quirk never breaks captures entirely.
-        if super::hdr_aware_enabled() && HdrCapture::is_hdr_available() {
+        // path priority matches RegionCapture — see src/capture/region.rs
+        // for the rationale on each env-var gate.
+        let env_on = super::hdr_aware_enabled();
+        let wgc_on = super::wgc_enabled();
+        let hdr_avail = HdrCapture::is_hdr_available();
+
+        if env_on && hdr_avail {
             let hdr = HdrCapture::new();
             match hdr.capture() {
                 Ok(img) => return Ok(img),
-                Err(e) => tracing::warn!("ScreenCapture HDR path failed — GDI fallback: {e:#}"),
+                Err(e) => tracing::warn!("ScreenCapture CPU HDR failed — fallthrough: {e:#}"),
+            }
+        }
+        #[cfg(windows)]
+        if hdr_avail && !env_on {
+            let monitor = self.find_monitor()?;
+            let center = (
+                monitor.x() + (monitor.width() as i32) / 2,
+                monitor.y() + (monitor.height() as i32) / 2,
+            );
+            if wgc_on {
+                let t0 = std::time::Instant::now();
+                match super::wgc_capture_at_point(center.0, center.1) {
+                    Ok(img) => {
+                        tracing::info!(
+                            "ScreenCapture WGC {}x{} in {}ms",
+                            img.width(), img.height(), t0.elapsed().as_millis()
+                        );
+                        return Ok(img);
+                    }
+                    Err(e) => tracing::warn!("ScreenCapture WGC failed — fallthrough: {e:#}"),
+                }
+            } else {
+                let t0 = std::time::Instant::now();
+                match super::d2d_capture_at_point(Some(center)) {
+                    Ok(img) => {
+                        tracing::info!(
+                            "ScreenCapture D2D {}x{} in {}ms",
+                            img.width(), img.height(), t0.elapsed().as_millis()
+                        );
+                        return Ok(img);
+                    }
+                    Err(e) => tracing::warn!("ScreenCapture D2D failed — GDI fallback: {e:#}"),
+                }
             }
         }
         let monitor = self.find_monitor()?;

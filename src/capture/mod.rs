@@ -9,6 +9,8 @@ mod tonemapping;
 mod cursor;
 #[cfg(windows)]
 mod wgc;
+#[cfg(windows)]
+mod d2d_tonemap;
 
 pub use screen::ScreenCapture;
 pub use window::WindowCapture;
@@ -17,6 +19,8 @@ pub use tonemapping::TonemapParams;
 pub use hdr::HdrCapture;
 #[cfg(windows)]
 pub use wgc::capture_at_point as wgc_capture_at_point;
+#[cfg(windows)]
+pub use d2d_tonemap::capture_hdr_to_sdr as d2d_capture_at_point;
 pub use hdr_png::{encode_hdr_png, read_cicp, HdrBitmap, HdrTransfer};
 pub use cursor::composite_system_cursor;
 
