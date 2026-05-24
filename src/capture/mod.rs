@@ -32,14 +32,16 @@ pub fn current_tonemap_params() -> TonemapParams {
     TONEMAP_OVERRIDE.get().copied().unwrap_or_default()
 }
 
-// HDR-aware capture gate, shared by all capture entry points. default-OFF
-// because the CPU tonemap pipeline takes multi-second time on 4K HDR
-// monitors and the per-channel clamp at sRGB encode means saturated
-// colours (magenta, cyan) still look overblown — same trade as ShareX,
-// Snipping Tool, Print Screen, etc. CAPSCR_HDR_AWARE=1 opts into the
-// slow-but-tonemapped path. WGC-based capture (OS-side tonemap, instant)
-// is in progress and will replace both this path and the GDI default
-// when ready.
+// Capture path gates. defaults match ShareX behaviour: plain GDI BitBlt
+// for everything, instant, SDR content identical to what Snipping Tool
+// produces, HDR content overblown (same as every other Windows screenshot
+// tool). two env vars opt into alternative paths:
+//   CAPSCR_HDR_AWARE=1 → CPU Reinhard tonemap on HDR pixels (slow,
+//                        tunable look, multi-second in debug builds)
+//   CAPSCR_USE_WGC=1   → Windows.Graphics.Capture with OS-side tonemap
+//                        (instant, OS-quality, but composes SDR content
+//                        via the HDR compositor on HDR displays which
+//                        can subtly shift SDR brightness vs GDI BitBlt)
 pub fn hdr_aware_enabled() -> bool {
     static GATE: OnceLock<bool> = OnceLock::new();
     *GATE.get_or_init(|| {
@@ -47,8 +49,20 @@ pub fn hdr_aware_enabled() -> bool {
         let forced_on = matches!(raw.trim(), "1" | "true" | "TRUE" | "on");
         tracing::info!(
             "CAPSCR_HDR_AWARE env var = {:?} -> hdr_aware_enabled = {}",
-            raw,
-            forced_on,
+            raw, forced_on,
+        );
+        forced_on
+    })
+}
+
+pub fn wgc_enabled() -> bool {
+    static GATE: OnceLock<bool> = OnceLock::new();
+    *GATE.get_or_init(|| {
+        let raw = std::env::var("CAPSCR_USE_WGC").unwrap_or_else(|_| "<unset>".to_string());
+        let forced_on = matches!(raw.trim(), "1" | "true" | "TRUE" | "on");
+        tracing::info!(
+            "CAPSCR_USE_WGC env var = {:?} -> wgc_enabled = {}",
+            raw, forced_on,
         );
         forced_on
     })
