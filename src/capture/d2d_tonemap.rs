@@ -84,7 +84,10 @@ pub fn capture_hdr_to_sdr(target: Option<(i32, i32)>) -> Result<RgbaImage> {
         let context = context.ok_or_else(|| anyhow!("D3D11CreateDevice null context"))?;
 
         // 3. duplication with HDR-first format list
-        let supported_formats = [DXGI_FORMAT_R16G16B16A16_FLOAT];
+        let supported_formats = [
+            DXGI_FORMAT_R16G16B16A16_FLOAT,
+            DXGI_FORMAT_R10G10B10A2_UNORM,
+        ];
         let mut duplication: IDXGIOutputDuplication = if let Ok(o5) = output1.cast::<IDXGIOutput5>()
         {
             o5.DuplicateOutput1(&device, 0, &supported_formats)
@@ -95,6 +98,9 @@ pub fn capture_hdr_to_sdr(target: Option<(i32, i32)>) -> Result<RgbaImage> {
                 .map_err(|e| anyhow!("DuplicateOutput failed: {e}"))?
         };
 
+        // Sleep briefly to let the DWM compositor populate the initial duplication texture
+        std::thread::sleep(std::time::Duration::from_millis(10));
+
         // 4. prime-frame loop — first AcquireNextFrame often returns stale
         //    data (LastPresentTime=0). release and retry until we see a
         //    real frame.
@@ -102,29 +108,29 @@ pub fn capture_hdr_to_sdr(target: Option<(i32, i32)>) -> Result<RgbaImage> {
         let mut desktop_resource: Option<IDXGIResource> = None;
         let mut acquired = false;
         for attempt in 0..30 {
-            match duplication.AcquireNextFrame(250, &mut frame_info, &mut desktop_resource) {
+            match duplication.AcquireNextFrame(10, &mut frame_info, &mut desktop_resource) {
                 Ok(()) => {
                     let real = frame_info.LastPresentTime != 0
                         || frame_info.AccumulatedFrames > 0
-                        || (attempt >= 5 && desktop_resource.is_some());
+                        || (attempt >= 1 && desktop_resource.is_some());
                     if real {
                         acquired = true;
                         break;
                     }
                     let _ = duplication.ReleaseFrame();
                     desktop_resource = None;
-                    std::thread::sleep(std::time::Duration::from_millis(16));
+                    std::thread::sleep(std::time::Duration::from_millis(2));
                 }
                 Err(e) if e.code() == DXGI_ERROR_ACCESS_LOST && attempt < 29 => {
                     if let Ok(fresh) = output1.DuplicateOutput(&device) {
                         duplication = fresh;
                     }
-                    std::thread::sleep(std::time::Duration::from_millis(100));
+                    std::thread::sleep(std::time::Duration::from_millis(10));
                 }
                 Err(e) if e.code() == DXGI_ERROR_WAIT_TIMEOUT => {
-                    std::thread::sleep(std::time::Duration::from_millis(16));
+                    std::thread::sleep(std::time::Duration::from_millis(2));
                 }
-                Err(_) => std::thread::sleep(std::time::Duration::from_millis(50)),
+                Err(_) => std::thread::sleep(std::time::Duration::from_millis(5)),
             }
         }
         if !acquired {
@@ -221,7 +227,10 @@ pub fn capture_hdr_to_sdr(target: Option<(i32, i32)>) -> Result<RgbaImage> {
             let tm: ID2D1Effect = d2d_ctx.CreateEffect(&CLSID_D2D1HdrToneMap)?;
             let wl_out = wl.GetOutput()?;
             tm.SetInput(0, &wl_out, true);
-            let in_max = max_lum_nits.max(1000.0).to_le_bytes();
+            // scale the input maximum luminance passed to HdrToneMap by the same factor
+            // that WhiteLevelAdjustment scaled the entire texture (80.0 / sdr_white_nits)
+            let scaled_in_max = (max_lum_nits * (80.0 / sdr_white_nits)).max(80.0);
+            let in_max = scaled_in_max.to_le_bytes();
             let out_max: [u8; 4] = 80.0_f32.to_le_bytes();
             tm.SetValue(
                 D2D1_HDRTONEMAP_PROP_INPUT_MAX_LUMINANCE.0 as u32,
