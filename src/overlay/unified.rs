@@ -199,7 +199,67 @@ mod windows_impl {
         None
     }
 
-    pub fn select() -> SelectionResult {
+    fn create_gdi_bitmap_from_image(img: &image::RgbaImage) -> Option<HBITMAP> {
+        use windows::Win32::Graphics::Gdi::{
+            CreateDIBSection, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS,
+        };
+        let width = img.width() as i32;
+        let height = img.height() as i32;
+
+        let mut bi: BITMAPINFO = unsafe { std::mem::zeroed() };
+        bi.bmiHeader = BITMAPINFOHEADER {
+            biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+            biWidth: width,
+            biHeight: -height, // top-down
+            biPlanes: 1,
+            biBitCount: 32,
+            biCompression: BI_RGB.0,
+            ..Default::default()
+        };
+
+        let mut bits_ptr: *mut std::ffi::c_void = std::ptr::null_mut();
+        let hbmp = unsafe {
+            CreateDIBSection(
+                HDC::default(),
+                &bi,
+                DIB_RGB_COLORS,
+                &mut bits_ptr,
+                None,
+                0,
+            )
+        }
+        .ok()?;
+
+        if hbmp.is_invalid() || bits_ptr.is_null() {
+            return None;
+        }
+
+        // Copy pixel bytes from img (RGBA) to GDI buffer (BGRA)
+        let pixels = img.as_raw();
+        unsafe {
+            let p = bits_ptr as *mut u8;
+            let len = (width as usize) * (height as usize) * 4;
+            let dest_slice = std::slice::from_raw_parts_mut(p, len);
+
+            if pixels.len() == len {
+                dest_slice.copy_from_slice(pixels);
+            } else {
+                let limit = dest_slice.len().min(pixels.len());
+                dest_slice[..limit].copy_from_slice(&pixels[..limit]);
+            }
+
+            for chunk in dest_slice.chunks_exact_mut(4) {
+                let r = chunk[0];
+                let b = chunk[2];
+                chunk[0] = b;
+                chunk[2] = r;
+            }
+        }
+
+        Some(hbmp)
+    }
+
+    pub fn select(frozen_frame: Option<std::sync::Arc<image::RgbaImage>>) -> SelectionResult {
         // single-flight: the windows_impl module backs the entire selector with
         // process-wide statics (START_X / SCREEN_BITMAP / etc.). A second
         // simultaneous select() call from e.g. tray-click while a hotkey-bound
@@ -240,23 +300,23 @@ mod windows_impl {
             let screen_dc = GetDC(None);
             let mem_dc = CreateCompatibleDC(screen_dc);
             if !mem_dc.is_invalid() {
-                // HDR-aware preview disabled — the DXGI desktop duplication
-                // path added multi-second latency to overlay open on HDR
-                // setups and on some configurations produced zeroed
-                // textures. fall back to GDI BitBlt unconditionally: HDR
-                // pixels read as overblown in the preview, matching what
-                // the saved capture looks like.
-                let (bitmap, needs_bitblt) = (
-                    CreateCompatibleBitmap(screen_dc, virt_width, virt_height),
-                    true,
-                );
+                // If a pre-captured frozen frame is provided, convert it to GDI HBITMAP.
+                // Otherwise, capture the screen live via GDI BitBlt snapshot.
+                let (bitmap, needs_bitblt) = if let Some(frozen) = &frozen_frame {
+                    if let Some(hbmp) = create_gdi_bitmap_from_image(frozen) {
+                        (hbmp, false)
+                    } else {
+                        (CreateCompatibleBitmap(screen_dc, virt_width, virt_height), true)
+                    }
+                } else {
+                    (CreateCompatibleBitmap(screen_dc, virt_width, virt_height), true)
+                };
+
                 if !bitmap.is_invalid() {
                     let old_bitmap = SelectObject(mem_dc, bitmap);
                     if needs_bitblt {
                         BitBlt(mem_dc, 0, 0, virt_width, virt_height, screen_dc, virt_x, virt_y, SRCCOPY).ok();
                     }
-                    SelectObject(mem_dc, old_bitmap);
-                    *SCREEN_BITMAP.lock().unwrap() = Some(bitmap.0 as isize);
 
                     // build a dim copy once, used per-frame during drag to
                     // paint the "outside selection" area without AlphaBlend.
@@ -264,7 +324,7 @@ mod windows_impl {
                     let dim_bmp = CreateCompatibleBitmap(screen_dc, virt_width, virt_height);
                     if !dim_dc.is_invalid() && !dim_bmp.is_invalid() {
                         let old_dim = SelectObject(dim_dc, dim_bmp);
-                        // start with a copy of the screen
+                        // start with a copy of the screen (mem_dc currently has bitmap selected)
                         let _ = BitBlt(dim_dc, 0, 0, virt_width, virt_height, mem_dc, 0, 0, SRCCOPY);
                         // darken via one AlphaBlend at startup (62% black overlay).
                         // amortised across the lifetime of the selector instead
@@ -296,6 +356,9 @@ mod windows_impl {
                         *DIM_BITMAP.lock().unwrap() = Some(dim_bmp.0 as isize);
                         *DIM_DC.lock().unwrap() = Some(dim_dc.0 as isize);
                     }
+
+                    SelectObject(mem_dc, old_bitmap);
+                    *SCREEN_BITMAP.lock().unwrap() = Some(bitmap.0 as isize);
                 }
                 *SCREEN_DC.lock().unwrap() = Some(mem_dc.0 as isize);
             }
@@ -381,11 +444,14 @@ mod windows_impl {
             // entire screen as overblown the instant screenshot mode
             // started. now DWM composites the dim over the live HDR
             // framebuffer directly.
+            // The freeze-frame is now perfectly color-correct and tonemapped in both SDR
+            // and HDR, so we can make the selector window fully opaque and render
+            // the static, dimmed freeze-frame snapshot on GDI backbuffer paint.
             let _ = SetLayeredWindowAttributes(
                 hwnd,
-                windows::Win32::Foundation::COLORREF(OVERLAY_COLORKEY),
-                OVERLAY_ALPHA,
-                LWA_ALPHA | LWA_COLORKEY,
+                windows::Win32::Foundation::COLORREF(0),
+                255,
+                LWA_ALPHA,
             );
 
             let _ = ShowWindow(hwnd, SW_SHOWNORMAL);
@@ -488,11 +554,26 @@ mod windows_impl {
                     )
                 };
 
-                // base = solid black. layered-window LWA_ALPHA makes it
-                // 70% opaque over the live HDR desktop (composited by DWM),
-                // so the user sees the *actual* screen tinted dark instead
-                // of an SDR-tonemapped (overblown) BitBlt snapshot.
-                {
+                // Paint the background using the dimmed freeze-frame snapshot (DIM_DC)
+                // so the user sees a perfectly color-accurate static desktop freeze-frame.
+                if let Some(dc) = *DIM_DC.lock().unwrap() {
+                    if let Some(bmp) = *DIM_BITMAP.lock().unwrap() {
+                        let dim_dc = HDC(dc as *mut _);
+                        let old_bmp = SelectObject(dim_dc, HBITMAP(bmp as *mut _));
+                        let _ = BitBlt(
+                            back_dc,
+                            0,
+                            0,
+                            width,
+                            height,
+                            dim_dc,
+                            0,
+                            0,
+                            SRCCOPY,
+                        );
+                        SelectObject(dim_dc, old_bmp);
+                    }
+                } else {
                     let black_brush = CreateSolidBrush(windows::Win32::Foundation::COLORREF(0x00000000));
                     let full = RECT { left: 0, top: 0, right: width, bottom: height };
                     FillRect(back_dc, &full, black_brush);
@@ -513,16 +594,29 @@ mod windows_impl {
                     let right = (sx.max(ex)) - virt_x;
                     let bottom = (sy.max(ey)) - virt_y;
 
-                    // back buffer is already solid black above, so the
-                    // dim layer is in place. paint the selection-rect
-                    // interior with the layered-window colorkey colour so
-                    // DWM punches through to the live HDR desktop inside
-                    // the selection (no SDR tonemap, what-you-see-is-
-                    // what-you-get).
-                    let key_brush = CreateSolidBrush(windows::Win32::Foundation::COLORREF(OVERLAY_COLORKEY));
-                    let sel_rect = RECT { left, top, right, bottom };
-                    FillRect(back_dc, &sel_rect, key_brush);
-                    let _ = DeleteObject(key_brush);
+                    if let Some(dc) = *SCREEN_DC.lock().unwrap() {
+                        if let Some(bmp) = *SCREEN_BITMAP.lock().unwrap() {
+                            let mem_dc = HDC(dc as *mut _);
+                            let old_bmp = SelectObject(mem_dc, HBITMAP(bmp as *mut _));
+                            let _ = BitBlt(
+                                back_dc,
+                                left,
+                                top,
+                                right - left,
+                                bottom - top,
+                                mem_dc,
+                                left,
+                                top,
+                                SRCCOPY,
+                            );
+                            SelectObject(mem_dc, old_bmp);
+                        }
+                    } else {
+                        let key_brush = CreateSolidBrush(windows::Win32::Foundation::COLORREF(OVERLAY_COLORKEY));
+                        let sel_rect = RECT { left, top, right, bottom };
+                        FillRect(back_dc, &sel_rect, key_brush);
+                        let _ = DeleteObject(key_brush);
+                    }
 
                     // 1px solid white selection border — greyscale, no chroma.
                     let border_pen = CreatePen(PS_SOLID, 1, windows::Win32::Foundation::COLORREF(0x00FFFFFF));
@@ -560,6 +654,25 @@ mod windows_impl {
                             let top = cached.top - virt_y;
                             let right = cached.right - virt_x;
                             let bottom = cached.bottom - virt_y;
+
+                            if let Some(dc) = *SCREEN_DC.lock().unwrap() {
+                                if let Some(bmp) = *SCREEN_BITMAP.lock().unwrap() {
+                                    let mem_dc = HDC(dc as *mut _);
+                                    let old_bmp = SelectObject(mem_dc, HBITMAP(bmp as *mut _));
+                                    let _ = BitBlt(
+                                        back_dc,
+                                        left,
+                                        top,
+                                        right - left,
+                                        bottom - top,
+                                        mem_dc,
+                                        left,
+                                        top,
+                                        SRCCOPY,
+                                    );
+                                    SelectObject(mem_dc, old_bmp);
+                                }
+                            }
 
                             // 1px white outline only — no fill. the previous 12%-alpha
                             // white wash inside the hovered window made bright UI look
@@ -897,7 +1010,7 @@ mod windows_impl {
 mod fallback_impl {
     use super::*;
 
-    pub fn select() -> SelectionResult {
+    pub fn select(_frozen_frame: Option<std::sync::Arc<image::RgbaImage>>) -> SelectionResult {
         SelectionResult::FullScreen
     }
 }
@@ -906,12 +1019,12 @@ pub struct UnifiedSelector;
 
 impl UnifiedSelector {
     #[cfg(windows)]
-    pub fn select() -> SelectionResult {
-        windows_impl::select()
+    pub fn select(frozen_frame: Option<std::sync::Arc<image::RgbaImage>>) -> SelectionResult {
+        windows_impl::select(frozen_frame)
     }
 
     #[cfg(not(windows))]
-    pub fn select() -> SelectionResult {
-        fallback_impl::select()
+    pub fn select(frozen_frame: Option<std::sync::Arc<image::RgbaImage>>) -> SelectionResult {
+        fallback_impl::select(frozen_frame)
     }
 }
