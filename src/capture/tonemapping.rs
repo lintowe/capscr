@@ -151,17 +151,18 @@ fn pq_to_linear_norm(pq: f32) -> f32 {
 // colours like pure magenta have low luminance (missing the green channel)
 // and survive at higher RGB values without triggering the compressor.
 //
-// the compressor itself: y = 1 + e/(1+e) where e = lum - 1, asymptoting
-// at 2.0; hard-capped at 1.5 to leave per-channel headroom for the final
-// clamp.
+// the compressor itself: y = knee + (1 - knee) * e / (e + (1 - knee)) where e = lum - knee,
+// asymptoting at 1.0, preserving SDR up to `knee = 0.85`, mapping SDR white (1.0)
+// to 0.925 (very bright and close to white), and rolling off all HDR highlights smoothly
+// into [0.925, 1.0) so they never clip or blow out.
 #[inline]
 fn tonemap_pixel(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
     let lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-    if lum <= 1.0 {
+    if lum <= 0.85 {
         return (r, g, b);
     }
-    let excess = lum - 1.0;
-    let compressed = (1.0 + excess / (1.0 + excess)).min(1.5);
+    let excess = lum - 0.85;
+    let compressed = 0.85 + 0.15 * excess / (excess + 0.15);
     let scale = compressed / lum;
     (r * scale, g * scale, b * scale)
 }
@@ -267,15 +268,15 @@ pub fn hdr10_to_sdr_bt2390(
     // decode PQ -> linear nits, then rescale into scRGB (1.0 = 80 nits)
     // so we can hand off to the scRGB path.
     let mut scrgb = vec![0.0f32; pixel_count * 4];
-    for i in 0..pixel_count {
-        let r_pq = pq_data[i * 4] as f32 / 65535.0;
-        let g_pq = pq_data[i * 4 + 1] as f32 / 65535.0;
-        let b_pq = pq_data[i * 4 + 2] as f32 / 65535.0;
-        let a_pq = pq_data[i * 4 + 3] as f32 / 65535.0;
-        scrgb[i * 4] = pq_to_linear(r_pq) / 80.0;
-        scrgb[i * 4 + 1] = pq_to_linear(g_pq) / 80.0;
-        scrgb[i * 4 + 2] = pq_to_linear(b_pq) / 80.0;
-        scrgb[i * 4 + 3] = a_pq;
+    for (src, dest) in pq_data.chunks_exact(4).zip(scrgb.chunks_exact_mut(4)) {
+        let r_pq = src[0] as f32 / 65535.0;
+        let g_pq = src[1] as f32 / 65535.0;
+        let b_pq = src[2] as f32 / 65535.0;
+        let a_pq = src[3] as f32 / 65535.0;
+        dest[0] = pq_to_linear(r_pq) / 80.0;
+        dest[1] = pq_to_linear(g_pq) / 80.0;
+        dest[2] = pq_to_linear(b_pq) / 80.0;
+        dest[3] = a_pq;
     }
     scrgb_to_sdr_bt2390(&scrgb, width, height, sdr_white_nits, params)
 }
@@ -301,15 +302,15 @@ pub fn hlg_to_sdr_bt2390(
     // HLG reference white is roughly 0.75 signal -> 1.0 linear; bring the
     // peak up to scRGB ~12 (1000 nits) before handing to the scRGB path.
     let mut scrgb = vec![0.0f32; pixel_count * 4];
-    for i in 0..pixel_count {
-        let r_hlg = hlg_data[i * 4] as f32 / 255.0;
-        let g_hlg = hlg_data[i * 4 + 1] as f32 / 255.0;
-        let b_hlg = hlg_data[i * 4 + 2] as f32 / 255.0;
-        let a_hlg = hlg_data[i * 4 + 3] as f32 / 255.0;
-        scrgb[i * 4] = hlg_to_linear(r_hlg) * 12.0;
-        scrgb[i * 4 + 1] = hlg_to_linear(g_hlg) * 12.0;
-        scrgb[i * 4 + 2] = hlg_to_linear(b_hlg) * 12.0;
-        scrgb[i * 4 + 3] = a_hlg;
+    for (src, dest) in hlg_data.chunks_exact(4).zip(scrgb.chunks_exact_mut(4)) {
+        let r_hlg = src[0] as f32 / 255.0;
+        let g_hlg = src[1] as f32 / 255.0;
+        let b_hlg = src[2] as f32 / 255.0;
+        let a_hlg = src[3] as f32 / 255.0;
+        dest[0] = hlg_to_linear(r_hlg) * 12.0;
+        dest[1] = hlg_to_linear(g_hlg) * 12.0;
+        dest[2] = hlg_to_linear(b_hlg) * 12.0;
+        dest[3] = a_hlg;
     }
     scrgb_to_sdr_bt2390(&scrgb, width, height, sdr_white_nits, params)
 }
@@ -355,18 +356,17 @@ mod tests {
 
     #[test]
     fn luminance_tonemap_identity_on_sdr() {
-        // any pixel with BT.709 luminance ≤ 1.0 must be the identity. that
+        // any pixel with BT.709 luminance ≤ 0.85 must be the identity. that
         // means SDR content on an HDR display (after working-space
-        // normalization) passes through pixel-perfect.
+        // normalization) passes through pixel-perfect below the knee.
         for (r, g, b) in [
             (0.0_f32, 0.0, 0.0),
-            (1.0, 1.0, 1.0),       // SDR white, lum=1.0
             (0.5, 0.5, 0.5),       // mid-grey
             (1.0, 0.0, 0.0),       // saturated red, lum=0.21
             (0.0, 1.0, 0.0),       // saturated green, lum=0.72
             (0.0, 0.0, 1.0),       // saturated blue, lum=0.07
             (1.0, 0.0, 1.0),       // SDR magenta, lum=0.28
-            (3.0, 0.0, 3.0),       // bright magenta, lum=0.85 (still ≤ 1)
+            (2.98, 0.0, 2.98),     // magenta, lum=0.2848 * 2.98 = 0.8487 (still ≤ 0.85)
         ] {
             let (r2, g2, b2) = tonemap_pixel(r, g, b);
             assert!((r2 - r).abs() < 1e-5, "r {r} -> {r2}");
@@ -377,25 +377,21 @@ mod tests {
 
     #[test]
     fn luminance_tonemap_compresses_bright_white() {
-        // bright white at 4× SDR (working space 4.0): lum=4.0, excess=3,
-        // compressed = 1 + 3/4 = 1.75 → capped at 1.5. scale = 1.5/4 = 0.375.
-        // each channel = 4*0.375 = 1.5, then clamped to 1.0 at encode.
+        // bright white at 4× SDR (working space 4.0): lum=4.0, excess=3.15,
+        // compressed = 0.85 + 0.15 * 3.15 / 3.3 = 0.99318.
         let (r, g, b) = tonemap_pixel(4.0, 4.0, 4.0);
-        assert!((r - 1.5).abs() < 1e-4, "{r}");
-        assert!((g - 1.5).abs() < 1e-4, "{g}");
-        assert!((b - 1.5).abs() < 1e-4, "{b}");
+        assert!((r - 0.99318).abs() < 1e-4, "{r}");
+        assert!((g - 0.99318).abs() < 1e-4, "{g}");
+        assert!((b - 0.99318).abs() < 1e-4, "{b}");
     }
 
     #[test]
     fn luminance_tonemap_distinguishes_wcg_and_hdr_magenta() {
         // WCG magenta at SDR brightness (working 1.5, R=B=1.5, G=0):
-        //   lum = 0.2848 * 1.5 = 0.427 ≤ 1.0 → identity, encodes to sRGB ~255 (clamped)
-        // HDR magenta at 4× brightness (working 6.0, R=B=6, G=0):
-        //   lum = 0.2848 * 6 = 1.71, excess = 0.71, compressed = 1 + 0.71/1.71 = 1.415
-        //   scale = 1.415/1.71 = 0.827. R = 6*0.827 = 4.96 → clamp 1.0
-        // both saturate per-channel. the real differentiation in the testufo
-        // scene happens for bright white-ish UI text + actually-different
-        // WCG primary brightness levels delivered by the OS.
+        //   lum = 0.2848 * 1.5 = 0.427 ≤ 0.85 → identity, encodes to sRGB ~255 (clamped)
+        // HDR magenta at 6× brightness (working 6.0, R=B=6, G=0):
+        //   lum = 0.2848 * 6 = 1.71, excess = 0.86, compressed = 0.85 + 0.15*0.86/1.01 = 0.9777
+        // both saturate/clamp to 255 per-channel at SDR 8-bit output.
         let (wcg_r, _, wcg_b) = tonemap_pixel(1.5, 0.0, 1.5);
         let (hdr_r, _, hdr_b) = tonemap_pixel(6.0, 0.0, 6.0);
         assert!(wcg_r >= 1.0 - 1e-4 && wcg_b >= 1.0 - 1e-4, "WCG should be at-or-above 1.0: {wcg_r}, {wcg_b}");
@@ -404,20 +400,20 @@ mod tests {
         // luminance-tonemap shines for screen-capture content.
         let (sdr_white_r, _, _) = tonemap_pixel(1.0, 1.0, 1.0);
         let (hdr_white_r, _, _) = tonemap_pixel(4.0, 4.0, 4.0);
-        assert!((sdr_white_r - 1.0).abs() < 1e-4, "SDR white must be 1.0: {sdr_white_r}");
-        assert!((hdr_white_r - 1.5).abs() < 1e-4, "HDR white must compress to 1.5: {hdr_white_r}");
+        assert!((sdr_white_r - 0.925).abs() < 1e-4, "SDR white must be 0.925: {sdr_white_r}");
+        assert!((hdr_white_r - 0.99318).abs() < 1e-4, "HDR white must compress to 0.99318: {hdr_white_r}");
     }
 
     #[test]
     fn sdr_pixels_pass_through_on_hdr_display() {
         // 100% SDR white at scRGB sdr/80 on a display configured for 250-nit
         // SDR white. with source peak == display peak (no HDR content), the
-        // EETF is the identity, so SDR white lands at sRGB 255.
+        // EETF is the identity, so SDR white lands at sRGB ~246 (linear 0.925).
         let sdr_white = 250.0;
         let scrgb = solid(2, 2, sdr_white / 80.0, sdr_white / 80.0, sdr_white / 80.0);
         let img = scrgb_to_sdr_bt2390(&scrgb, 2, 2, sdr_white, TonemapParams::default());
         let p = img.get_pixel(0, 0);
-        assert!(p[0] >= 250 && p[1] >= 250 && p[2] >= 250, "SDR white clipped: {p:?}");
+        assert!(p[0] >= 245 && p[1] >= 245 && p[2] >= 245, "SDR white: {p:?}");
     }
 
     #[test]
@@ -485,12 +481,12 @@ mod tests {
         // an SDR pixel at scRGB 4.0 (320 nits) used to be treated as an
         // HDR highlight and survived the tonemap above sRGB 200. with
         // SDR-white normalization it sits at exactly 1.0 in working space
-        // and lands at output white without being further amplified.
+        // and lands at sRGB ~246 (linear 0.925) without being further amplified.
         let sdr_white = 320.0;
         let scrgb = solid(2, 2, 4.0, 4.0, 4.0);
         let img = scrgb_to_sdr_bt2390(&scrgb, 2, 2, sdr_white, TonemapParams::default());
         let p = img.get_pixel(0, 0);
-        assert!(p[0] >= 250, "SDR white on bright display should land at 255: {p:?}");
+        assert!(p[0] >= 245, "SDR white on bright display: {p:?}");
     }
 
     #[test]
@@ -513,12 +509,12 @@ mod tests {
     #[test]
     fn override_takes_precedence_over_detected_white() {
         // detected 80, override 250: a pixel at scRGB 250/80 should land at
-        // output white because the override (not the detected value) drives
+        // sRGB ~246 because the override (not the detected value) drives
         // the normalization.
         let params = TonemapParams { sdr_white_nits_override: 250.0, ..TonemapParams::default() };
         let scrgb = solid(2, 2, 250.0 / 80.0, 250.0 / 80.0, 250.0 / 80.0);
         let img = scrgb_to_sdr_bt2390(&scrgb, 2, 2, 80.0, params);
         let p = img.get_pixel(0, 0);
-        assert!(p[0] >= 250, "override-driven SDR white clipped: {p:?}");
+        assert!(p[0] >= 245, "override-driven SDR white: {p:?}");
     }
 }
