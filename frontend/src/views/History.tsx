@@ -245,6 +245,7 @@ export function History() {
                   class="tile-img"
                   src={convertFileSrc(e.path)}
                   alt={e.filename}
+                  loading="lazy"
                   onError={(ev) => {
                     (ev.currentTarget as HTMLImageElement).style.opacity =
                       "0.3";

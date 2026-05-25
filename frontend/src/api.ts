@@ -7,7 +7,8 @@ export type PostAction =
   | "upload"
   | "save-and-clipboard"
   | "open-editor"
-  | "prompt";
+  | "prompt"
+  | "do-nothing";
 
 export interface HdrConfig {
   brightness_nits: number;
@@ -98,7 +99,8 @@ export interface CaptureTask {
     | "upload"
     | "save-and-clipboard"
     | "open-editor"
-    | "prompt";
+    | "prompt"
+    | "do-nothing";
   target_destination?: "imgur" | "custom" | "ftp" | "sftp" | null;
 }
 
