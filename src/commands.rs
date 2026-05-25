@@ -38,6 +38,7 @@ pub enum PostActionArg {
     SaveAndClipboard,
     OpenEditor,
     Prompt,
+    DoNothing,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -231,6 +232,16 @@ fn run_capture_pipeline_inner(
     app: &AppHandle,
     upload_target: Option<crate::config::TaskUploadTarget>,
 ) -> anyhow::Result<()> {
+    #[cfg(windows)]
+    let mode = {
+        if is_foreground_window_fullscreen() {
+            tracing::info!("Foreground window is fullscreen/game — bypassing selector overlay to prevent deadlock/blocking.");
+            CaptureModeArg::ActiveMonitor
+        } else {
+            mode
+        }
+    };
+
     use std::sync::atomic::Ordering;
     let gate_state = app.state::<AppState>();
     // drop the trigger when a previous capture is still in flight (likely
@@ -254,21 +265,9 @@ fn run_capture_pipeline_inner(
     }
     let _gate = CaptureGate(&gate_state.capture_in_progress);
 
-    let selection = match mode {
-        CaptureModeArg::Region | CaptureModeArg::Window | CaptureModeArg::Fullscreen => {
-            UnifiedSelector::select()
-        }
-        CaptureModeArg::ActiveMonitor => SelectionResult::FullScreen,
-    };
-
-    // honour the configured pre-capture delay (used to set up menus / hover
-    // states between picking the region and the actual grab). Skip when the
-    // selection was cancelled or a color was picked — neither produces a
-    // pixel capture.
-    if matches!(
-        selection,
-        SelectionResult::Region(_) | SelectionResult::Window(_) | SelectionResult::FullScreen
-    ) {
+    // honour the configured pre-capture delay before capturing the freeze-frame
+    // (used to set up menus / hover states before the snapshot is taken).
+    {
         let delay_ms = app
             .state::<AppState>()
             .config
@@ -281,31 +280,142 @@ fn run_capture_pipeline_inner(
         }
     }
 
+    let frozen_frame = if matches!(
+        mode,
+        CaptureModeArg::Region | CaptureModeArg::Window | CaptureModeArg::Fullscreen
+    ) {
+        let t0 = std::time::Instant::now();
+        match ScreenCapture::all_monitors() {
+            Ok(img) => {
+                tracing::info!("Captured full screen freeze-frame in {}ms", t0.elapsed().as_millis());
+                Some(Arc::new(img))
+            }
+            Err(e) => {
+                tracing::warn!("Failed to capture full screen freeze-frame: {e:#}");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    let selection = match mode {
+        CaptureModeArg::Region | CaptureModeArg::Window | CaptureModeArg::Fullscreen => {
+            UnifiedSelector::select(frozen_frame.clone())
+        }
+        CaptureModeArg::ActiveMonitor => SelectionResult::FullScreen,
+    };
+
     tracing::info!("run_capture_pipeline_inner: selection = {selection:?}");
 
     let (mut image, hdr_bitmap, screen_origin): (image::RgbaImage, Option<crate::capture::HdrBitmap>, Option<(i32, i32)>) = match selection {
         SelectionResult::Cancelled => return Ok(()),
-        SelectionResult::Region(rect) => (
-            RegionCapture::new(rect).capture()?,
-            None,
-            Some((rect.x, rect.y)),
-        ),
-        SelectionResult::Window(hwnd) => {
-            // retry once after a short sleep — xcap can transiently miss
-            // windows during z-order shuffles right after the selector closes
-            // and focus jumps to the target window
-            let cap = WindowCapture::new(hwnd);
-            let img = match cap.capture() {
-                Ok(img) => img,
-                Err(_) => {
-                    std::thread::sleep(std::time::Duration::from_millis(80));
-                    cap.capture()?
+        SelectionResult::Region(rect) => {
+            if let Some(frozen) = &frozen_frame {
+                #[cfg(windows)]
+                let (min_x, min_y) = {
+                    if let Ok(monitors) = crate::capture::fast_list_monitors() {
+                        let mx = monitors.iter().map(|m| m.x).min().unwrap_or(0);
+                        let my = monitors.iter().map(|m| m.y).min().unwrap_or(0);
+                        (mx, my)
+                    } else {
+                        (0, 0)
+                    }
+                };
+                #[cfg(not(windows))]
+                let (min_x, min_y) = (0, 0);
+
+                let img_x = (rect.x - min_x).max(0) as u32;
+                let img_y = (rect.y - min_y).max(0) as u32;
+                let crop_width = rect.width.min(frozen.width().saturating_sub(img_x));
+                let crop_height = rect.height.min(frozen.height().saturating_sub(img_y));
+                if crop_width > 0 && crop_height > 0 {
+                    let cropped = image::imageops::crop_imm(&**frozen, img_x, img_y, crop_width, crop_height).to_image();
+                    (cropped, None, Some((rect.x, rect.y)))
+                } else {
+                    (
+                        RegionCapture::new(rect).capture()?,
+                        None,
+                        Some((rect.x, rect.y)),
+                    )
                 }
-            };
-            // look up the window's screen origin so the cursor composite can
-            // land at the right offset within the captured pixels.
-            let origin = window_screen_origin(hwnd);
-            (img, None, origin)
+            } else {
+                (
+                    RegionCapture::new(rect).capture()?,
+                    None,
+                    Some((rect.x, rect.y)),
+                )
+            }
+        }
+        SelectionResult::Window(hwnd) => {
+            if let Some(frozen) = &frozen_frame {
+                #[cfg(windows)]
+                unsafe {
+                    use windows::Win32::UI::WindowsAndMessaging::GetWindowRect;
+                    use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_EXTENDED_FRAME_BOUNDS};
+                    use windows::Win32::Foundation::{RECT, HWND};
+                    let mut rect = RECT::default();
+                    let hwnd_struct = HWND(hwnd as *mut _);
+                    let dwm_ok = DwmGetWindowAttribute(
+                        hwnd_struct,
+                        DWMWA_EXTENDED_FRAME_BOUNDS,
+                        &mut rect as *mut RECT as *mut _,
+                        std::mem::size_of::<RECT>() as u32,
+                    ).is_ok();
+                    if dwm_ok || GetWindowRect(hwnd_struct, &mut rect).is_ok() {
+                        let (min_x, min_y) = if let Ok(monitors) = crate::capture::fast_list_monitors() {
+                            let mx = monitors.iter().map(|m| m.x).min().unwrap_or(0);
+                            let my = monitors.iter().map(|m| m.y).min().unwrap_or(0);
+                            (mx, my)
+                        } else {
+                            (0, 0)
+                        };
+
+                        let w_x = rect.left;
+                        let w_y = rect.top;
+                        let w_w = (rect.right - rect.left).max(0) as u32;
+                        let w_h = (rect.bottom - rect.top).max(0) as u32;
+
+                        let img_x = (w_x - min_x).max(0) as u32;
+                        let img_y = (w_y - min_y).max(0) as u32;
+                        let crop_width = w_w.min(frozen.width().saturating_sub(img_x));
+                        let crop_height = w_h.min(frozen.height().saturating_sub(img_y));
+
+                        if crop_width > 0 && crop_height > 0 {
+                            let cropped = image::imageops::crop_imm(&**frozen, img_x, img_y, crop_width, crop_height).to_image();
+                            (cropped, None, Some((w_x, w_y)))
+                        } else {
+                            let cap = WindowCapture::new(hwnd);
+                            let img = cap.capture()?;
+                            let origin = window_screen_origin(hwnd);
+                            (img, None, origin)
+                        }
+                    } else {
+                        let cap = WindowCapture::new(hwnd);
+                        let img = cap.capture()?;
+                        let origin = window_screen_origin(hwnd);
+                        (img, None, origin)
+                    }
+                }
+                #[cfg(not(windows))]
+                {
+                    let cap = WindowCapture::new(hwnd);
+                    let img = cap.capture()?;
+                    let origin = window_screen_origin(hwnd);
+                    (img, None, origin)
+                }
+            } else {
+                let cap = WindowCapture::new(hwnd);
+                let img = match cap.capture() {
+                    Ok(img) => img,
+                    Err(_) => {
+                        std::thread::sleep(std::time::Duration::from_millis(80));
+                        cap.capture()?
+                    }
+                };
+                let origin = window_screen_origin(hwnd);
+                (img, None, origin)
+            }
         }
         SelectionResult::FullScreen => {
             let (img, hdr) = capture_active_monitor_with_hdr()?;
@@ -392,19 +502,17 @@ fn run_capture_pipeline_inner(
         PostActionArg::SaveAndClipboard => PostCaptureAction::SaveAndCopy,
         PostActionArg::OpenEditor => unreachable!(),
         PostActionArg::Prompt => PostCaptureAction::PromptUser,
+        PostActionArg::DoNothing => PostCaptureAction::DoNothing,
     };
 
-    let result = run_post_action(app, &state, &image, post_action, upload_target);
-    // drop the HDR sidecar next to the file we just wrote — never against
-    // a previous capture's path, which is what reading state.last_save
-    // would surface for clipboard-only / upload-only actions.
-    if let Ok(Some(sdr_path)) = &result {
-        let cfg = state.config.lock().unwrap().clone();
-        maybe_write_hdr_sidecar(sdr_path, &hdr_bitmap, &cfg);
-        // notify the hub so the History tab live-refreshes — otherwise the
-        // user has to hit "reload" manually after every capture.
-        let _ = app.emit("capscr://capture-saved", sdr_path.to_string_lossy().to_string());
-    }
+    let result = run_post_action(
+        app,
+        &state,
+        image.clone(),
+        hdr_bitmap,
+        post_action,
+        upload_target,
+    );
     result.map(|_| ())
 }
 
@@ -596,33 +704,48 @@ fn maybe_write_hdr_sidecar(
 fn run_post_action(
     app: &AppHandle,
     state: &AppState,
-    image: &RgbaImage,
+    image: Arc<RgbaImage>,
+    hdr_bitmap: Option<crate::capture::HdrBitmap>,
     action: PostCaptureAction,
     upload_target: Option<crate::config::TaskUploadTarget>,
 ) -> anyhow::Result<Option<PathBuf>> {
     let config = state.config.lock().unwrap().clone();
 
-    let do_save = || -> anyhow::Result<PathBuf> {
+    let do_save_async = |img: Arc<RgbaImage>, hdr: Option<crate::capture::HdrBitmap>, app_handle: AppHandle| -> anyhow::Result<PathBuf> {
         let base = config.output_path();
         let path = get_unique_filepath(&base);
         if let Err(e) = std::fs::create_dir_all(&config.output.directory) {
             tracing::warn!("failed to create output dir: {e}");
         }
-        save_image(image, &path, config.output.format, config.output.quality)?;
         *state.last_save.lock().unwrap() = Some(path.clone());
+        
+        let path_clone = path.clone();
+        let format = config.output.format;
+        let quality = config.output.quality;
+        let config_clone = config.clone();
+        std::thread::spawn(move || {
+            let t0 = std::time::Instant::now();
+            if let Err(e) = save_image(&img, &path_clone, format, quality) {
+                tracing::error!("Background save_image failed: {e:#}");
+            } else {
+                maybe_write_hdr_sidecar(&path_clone, &hdr, &config_clone);
+                tracing::info!("Background save completed in {}ms", t0.elapsed().as_millis());
+                let _ = app_handle.emit("capscr://capture-saved", path_clone.to_string_lossy().to_string());
+            }
+        });
         Ok(path)
     };
 
     let do_clipboard = || -> anyhow::Result<()> {
         let mut cb = ClipboardManager::new()?;
-        cb.copy_image(image)?;
+        cb.copy_image(&image)?;
         Ok(())
     };
 
     let do_upload = || -> anyhow::Result<crate::upload::UploadResult> {
         let uploader = crate::upload::shared_uploader()?;
         let service = build_upload_service_for_target(&config, upload_target);
-        let result = uploader.upload(image, &service)?;
+        let result = uploader.upload(&image, &service)?;
         state.record_upload(UploadRecord {
             url: result.url.clone(),
             delete_url: result.delete_url.clone(),
@@ -636,7 +759,7 @@ fn run_post_action(
 
     match action {
         PostCaptureAction::SaveToFile => {
-            let path = do_save()?;
+            let path = do_save_async(image.clone(), hdr_bitmap.clone(), app.clone())?;
             Sound::Screenshot.play_if_enabled(config.post_capture.play_sound);
             if config.ui.show_notifications {
                 let _ = show_notification("Capture saved", &path.to_string_lossy());
@@ -664,7 +787,7 @@ fn run_post_action(
             Ok(None)
         }
         PostCaptureAction::SaveAndCopy => {
-            let path = do_save()?;
+            let path = do_save_async(image.clone(), hdr_bitmap.clone(), app.clone())?;
             // don't claim "+ copied" if the clipboard step actually failed —
             // surface the partial success honestly. Save is the source of
             // truth; clipboard is best-effort because another app could be
@@ -691,7 +814,7 @@ fn run_post_action(
             Ok(None)
         }
         PostCaptureAction::PromptUser => {
-            let path = do_save()?;
+            let path = do_save_async(image.clone(), hdr_bitmap.clone(), app.clone())?;
             let clipboard_ok = do_clipboard().is_ok();
             Sound::Screenshot.play_if_enabled(config.post_capture.play_sound);
             if config.ui.show_notifications {
@@ -703,6 +826,13 @@ fn run_post_action(
                 let _ = show_notification(title, &path.to_string_lossy());
             }
             Ok(Some(path))
+        }
+        PostCaptureAction::DoNothing => {
+            Sound::Screenshot.play_if_enabled(config.post_capture.play_sound);
+            if config.ui.show_notifications {
+                let _ = show_notification("Capture complete", "Screenshot taken successfully.");
+            }
+            Ok(None)
         }
     }
 }
@@ -798,6 +928,7 @@ pub fn list_captures(state: State<AppState>) -> Result<Vec<HistoryEntry>, String
         });
     }
     entries.sort_by_key(|e| std::cmp::Reverse(e.modified_unix));
+    entries.truncate(1000);
     tracing::info!(
         "list_captures: {} entries from {}",
         entries.len(),
@@ -1342,7 +1473,7 @@ fn run_gif_task(task: &CaptureTask, app: &AppHandle) -> anyhow::Result<()> {
         tracing::info!("capture already in progress; dropping gif trigger");
         return Ok(());
     }
-    let selection = UnifiedSelector::select();
+    let selection = UnifiedSelector::select(None);
     state.capture_in_progress.store(false, OrdGif::SeqCst);
 
     let region = match selection {
@@ -1535,7 +1666,7 @@ fn apply_gif_post_action(task: &CaptureTask, app: &AppHandle, path: &std::path::
                 }
             });
         }
-        TaskPostAction::SaveFile | TaskPostAction::Prompt => {
+        TaskPostAction::SaveFile | TaskPostAction::Prompt | TaskPostAction::DoNothing => {
             // already saved to disk; nothing further.
         }
     }
@@ -1562,6 +1693,7 @@ impl PostActionArg {
             TaskPostAction::SaveAndClipboard => PostActionArg::SaveAndClipboard,
             TaskPostAction::OpenEditor => PostActionArg::OpenEditor,
             TaskPostAction::Prompt => PostActionArg::Prompt,
+            TaskPostAction::DoNothing => PostActionArg::DoNothing,
         }
     }
 }
@@ -2050,4 +2182,42 @@ pub fn set_hotkeys_disabled(
     crate::rebuild_tray_menu(&app);
     let _ = app.emit("capscr://hotkey-status", ());
     Ok(())
+}
+
+#[cfg(windows)]
+fn is_foreground_window_fullscreen() -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetForegroundWindow, GetWindowRect, GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN,
+        GetShellWindow, GetDesktopWindow,
+    };
+    use windows::Win32::Foundation::RECT;
+
+    unsafe {
+        let hwnd = GetForegroundWindow();
+        if hwnd.0.is_null() {
+            return false;
+        }
+
+        // Skip shell and desktop windows
+        let shell = GetShellWindow();
+        let desktop = GetDesktopWindow();
+        if hwnd == shell || hwnd == desktop {
+            return false;
+        }
+
+        let mut rect = RECT::default();
+        if GetWindowRect(hwnd, &mut rect).is_err() {
+            return false;
+        }
+
+        let screen_w = GetSystemMetrics(SM_CXSCREEN);
+        let screen_h = GetSystemMetrics(SM_CYSCREEN);
+
+        let w_width = rect.right - rect.left;
+        let w_height = rect.bottom - rect.top;
+
+        // If the foreground window occupies the entire screen (or larger, as games sometimes do),
+        // it is a full-screen window!
+        w_width >= screen_w && w_height >= screen_h
+    }
 }
