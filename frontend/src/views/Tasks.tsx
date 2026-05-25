@@ -20,6 +20,7 @@ const POST_ACTIONS: { id: CaptureTask["post_action"]; label: string }[] = [
   { id: "upload", label: "upload" },
   { id: "open-editor", label: "open in editor" },
   { id: "prompt", label: "prompt" },
+  { id: "do-nothing", label: "do nothing" },
 ];
 
 const UPLOAD_TARGETS: NonNullable<CaptureTask["target_destination"]>[] = [
