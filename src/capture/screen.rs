@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use image::RgbaImage;
+use image::{GenericImage, RgbaImage};
 use xcap::Monitor;
 
 use super::{Capture, MonitorInfo};
@@ -21,6 +21,16 @@ impl ScreenCapture {
     }
 
     pub fn primary() -> Result<Self> {
+        #[cfg(windows)]
+        {
+            if let Ok(monitors) = super::fast_list_monitors() {
+                if let Some(primary) = monitors.into_iter().find(|m| m.is_primary) {
+                    return Ok(Self {
+                        monitor_id: Some(primary.id),
+                    });
+                }
+            }
+        }
         let monitors = Monitor::all()?;
         let primary = monitors
             .into_iter()
@@ -32,6 +42,19 @@ impl ScreenCapture {
     }
 
     pub fn at_point(x: i32, y: i32) -> Result<Self> {
+        #[cfg(windows)]
+        {
+            if let Ok(monitors) = super::fast_list_monitors() {
+                if let Some(m) = monitors.into_iter().find(|m| {
+                    x >= m.x && x < m.x + m.width as i32 &&
+                    y >= m.y && y < m.y + m.height as i32
+                }) {
+                    return Ok(Self {
+                        monitor_id: Some(m.id),
+                    });
+                }
+            }
+        }
         let monitor = Monitor::from_point(x, y)?;
         Ok(Self {
             monitor_id: Some(monitor.id()),
@@ -41,21 +64,36 @@ impl ScreenCapture {
     pub fn all_monitors() -> Result<RgbaImage> {
         const MAX_TOTAL_DIMENSION: i32 = 32768;
 
-        let monitors = Monitor::all()?;
+        #[cfg(windows)]
+        let monitors = super::fast_list_monitors()?;
+        #[cfg(not(windows))]
+        let monitors = {
+            let screens = Monitor::all()?;
+            screens.into_iter().map(|s| super::MonitorInfo {
+                id: s.id(),
+                name: s.name().to_string(),
+                x: s.x(),
+                y: s.y(),
+                width: s.width(),
+                height: s.height(),
+                is_primary: s.is_primary(),
+            }).collect::<Vec<_>>()
+        };
+
         if monitors.is_empty() {
             return Err(anyhow!("No monitors found"));
         }
 
-        let min_x = monitors.iter().map(|m| m.x()).min().unwrap_or(0);
-        let min_y = monitors.iter().map(|m| m.y()).min().unwrap_or(0);
+        let min_x = monitors.iter().map(|m| m.x).min().unwrap_or(0);
+        let min_y = monitors.iter().map(|m| m.y).min().unwrap_or(0);
         let max_x = monitors
             .iter()
-            .map(|m| m.x().saturating_add(m.width() as i32))
+            .map(|m| m.x.saturating_add(m.width as i32))
             .max()
             .unwrap_or(0);
         let max_y = monitors
             .iter()
-            .map(|m| m.y().saturating_add(m.height() as i32))
+            .map(|m| m.y.saturating_add(m.height as i32))
             .max()
             .unwrap_or(0);
 
@@ -75,9 +113,24 @@ impl ScreenCapture {
         let mut combined = RgbaImage::new(total_width, total_height);
 
         for monitor in monitors {
-            let img = monitor.capture_image()?;
-            let offset_x_i32 = monitor.x().saturating_sub(min_x);
-            let offset_y_i32 = monitor.y().saturating_sub(min_y);
+            let img = match super::fast_gdi_capture(monitor.x, monitor.y, monitor.width, monitor.height) {
+                Ok(img) => img,
+                Err(_) => {
+                    let screens = Monitor::all()?;
+                    let m = screens.into_iter().find(|s| s.id() == monitor.id)
+                        .ok_or_else(|| anyhow!("Monitor not found"))?;
+                    m.capture_image()?
+                }
+            };
+            let img = super::orient_captured_image(
+                img,
+                monitor.width,
+                monitor.height,
+                monitor.x,
+                monitor.y,
+            );
+            let offset_x_i32 = monitor.x.saturating_sub(min_x);
+            let offset_y_i32 = monitor.y.saturating_sub(min_y);
 
             if offset_x_i32 < 0 || offset_y_i32 < 0 {
                 continue;
@@ -86,12 +139,8 @@ impl ScreenCapture {
             let offset_x = offset_x_i32 as u32;
             let offset_y = offset_y_i32 as u32;
 
-            for (x, y, pixel) in img.enumerate_pixels() {
-                let dest_x = offset_x.saturating_add(x);
-                let dest_y = offset_y.saturating_add(y);
-                if dest_x < total_width && dest_y < total_height {
-                    combined.put_pixel(dest_x, dest_y, *pixel);
-                }
+            if let Err(e) = combined.copy_from(&img, offset_x, offset_y) {
+                tracing::warn!("Failed to copy monitor image into combined buffer: {e}");
             }
         }
 
@@ -115,6 +164,18 @@ impl ScreenCapture {
     }
 
     pub fn get_monitor_info(&self) -> Result<MonitorInfo> {
+        #[cfg(windows)]
+        {
+            if let Ok(monitors) = super::fast_list_monitors() {
+                let info = match self.monitor_id {
+                    Some(id) => monitors.into_iter().find(|m| m.id == id),
+                    None => monitors.into_iter().find(|m| m.is_primary).or_else(|| super::fast_list_monitors().ok()?.into_iter().next()),
+                };
+                if let Some(m) = info {
+                    return Ok(m);
+                }
+            }
+        }
         let monitor = self.find_monitor()?;
         Ok(MonitorInfo {
             id: monitor.id(),
@@ -153,13 +214,15 @@ impl Capture for ScreenCapture {
                 Err(e) => tracing::warn!("ScreenCapture CPU HDR failed — fallthrough: {e:#}"),
             }
         }
+        
+        let monitor_info = self.get_monitor_info()?;
+        let center = (
+            monitor_info.x + (monitor_info.width as i32) / 2,
+            monitor_info.y + (monitor_info.height as i32) / 2,
+        );
+
         #[cfg(windows)]
         if hdr_avail && !env_on {
-            let monitor = self.find_monitor()?;
-            let center = (
-                monitor.x() + (monitor.width() as i32) / 2,
-                monitor.y() + (monitor.height() as i32) / 2,
-            );
             if wgc_on {
                 let t0 = std::time::Instant::now();
                 match super::wgc_capture_at_point(center.0, center.1) {
@@ -186,14 +249,20 @@ impl Capture for ScreenCapture {
                 }
             }
         }
-        let monitor = self.find_monitor()?;
-        let img = monitor.capture_image()?;
+        let img = match super::fast_gdi_capture(monitor_info.x, monitor_info.y, monitor_info.width, monitor_info.height) {
+            Ok(img) => img,
+            Err(e) => {
+                tracing::warn!("fast GDI capture failed — falling back to xcap: {e:#}");
+                let m = self.find_monitor()?;
+                m.capture_image()?
+            }
+        };
         let img = super::orient_captured_image(
             img,
-            monitor.width(),
-            monitor.height(),
-            monitor.x(),
-            monitor.y(),
+            monitor_info.width,
+            monitor_info.height,
+            monitor_info.x,
+            monitor_info.y,
         );
 
         if img.width() > MAX_CAPTURE_DIMENSION || img.height() > MAX_CAPTURE_DIMENSION {

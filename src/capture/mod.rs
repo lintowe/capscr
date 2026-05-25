@@ -11,6 +11,8 @@ mod cursor;
 mod wgc;
 #[cfg(windows)]
 mod d2d_tonemap;
+#[cfg(windows)]
+mod gdi;
 
 pub use screen::ScreenCapture;
 pub use window::WindowCapture;
@@ -21,6 +23,8 @@ pub use hdr::HdrCapture;
 pub use wgc::capture_at_point as wgc_capture_at_point;
 #[cfg(windows)]
 pub use d2d_tonemap::capture_hdr_to_sdr as d2d_capture_at_point;
+#[cfg(windows)]
+pub use gdi::{fast_gdi_capture, fast_list_monitors};
 pub use hdr_png::{encode_hdr_png, read_cicp, HdrBitmap, HdrTransfer};
 pub use cursor::composite_system_cursor;
 
@@ -245,6 +249,12 @@ pub struct WindowInfo {
 }
 
 pub fn list_monitors() -> Result<Vec<MonitorInfo>> {
+    #[cfg(windows)]
+    {
+        if let Ok(monitors) = fast_list_monitors() {
+            return Ok(monitors);
+        }
+    }
     let screens = xcap::Monitor::all()?;
     let monitors: Vec<MonitorInfo> = screens
         .into_iter()
