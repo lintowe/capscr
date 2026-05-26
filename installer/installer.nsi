@@ -187,7 +187,7 @@ Function CapscrApplyDarkFrame
   IntCmp $0 0 +2 +2
     System::Call 'DWMAPI::DwmSetWindowAttribute(p$HWNDPARENT,i19,*i1,i4)i.r0'
   System::Call 'USER32::SetProp(p$HWNDPARENT,t"UseImmersiveDarkModeColors",p1)'
-  ; per-process dark mode (uxtheme ordinal 135 = SetPreferredAppMode(AllowDark))
+  ; per-process dark mode (uxtheme ordinal 135 = SetPreferredAppMode(ForceDark))
   System::Call 'UXTHEME::#135(i2)'
   ; theme the outer frame controls — Next/Cancel buttons + branding
   System::Call 'USER32::GetDlgItem(p$HWNDPARENT,i1)p.r1'
@@ -233,41 +233,91 @@ FunctionEnd
 ; dynamically *after* .onGUIInit has run.
 Function CapscrDarkenPage
   FindWindow $R0 "#32770" "" $HWNDPARENT
-  StrCmp $R0 "" +2 0
+  StrCmp $R0 "" +3 0
+    SetCtlColors $R0 c4c4c4 0d0d0d
     !insertmacro _CapscrThemeControl $R0
   ; common MUI control IDs (1004 dir-edit, 1019 license-edit, 1006 list, etc.)
   System::Call 'USER32::GetDlgItem(p$R0,i1001)p.r1'
   !insertmacro _CapscrThemeControl $1
+  SetCtlColors $1 c4c4c4 0d0d0d
   System::Call 'USER32::GetDlgItem(p$R0,i1004)p.r1'
   !insertmacro _CapscrThemeControl $1
+  SetCtlColors $1 c4c4c4 0d0d0d
   System::Call 'USER32::GetDlgItem(p$R0,i1006)p.r1'
   !insertmacro _CapscrThemeControl $1
+  SetCtlColors $1 c4c4c4 0d0d0d
   System::Call 'USER32::GetDlgItem(p$R0,i1016)p.r1'
   !insertmacro _CapscrThemeControl $1
+  SetCtlColors $1 c4c4c4 0d0d0d
   System::Call 'USER32::GetDlgItem(p$R0,i1017)p.r1'
   !insertmacro _CapscrThemeControl $1
+  SetCtlColors $1 c4c4c4 0d0d0d
   System::Call 'USER32::GetDlgItem(p$R0,i1019)p.r1'
   !insertmacro _CapscrThemeControl $1
+  SetCtlColors $1 c4c4c4 0d0d0d
+  System::Call 'USER32::GetDlgItem(p$R0,i1020)p.r1'
+  !insertmacro _CapscrThemeControl $1
+  SetCtlColors $1 c4c4c4 0d0d0d
+  System::Call 'USER32::GetDlgItem(p$R0,i1023)p.r1'
+  !insertmacro _CapscrThemeControl $1
+  SetCtlColors $1 c4c4c4 0d0d0d
+  System::Call 'USER32::GetDlgItem(p$R0,i1024)p.r1'
+  !insertmacro _CapscrThemeControl $1
+  SetCtlColors $1 c4c4c4 0d0d0d
   System::Call 'USER32::GetDlgItem(p$R0,i1034)p.r1'
   !insertmacro _CapscrThemeControl $1
+  SetCtlColors $1 c4c4c4 0d0d0d
   System::Call 'USER32::GetDlgItem(p$R0,i1036)p.r1'
   !insertmacro _CapscrThemeControl $1
+  SetCtlColors $1 c4c4c4 0d0d0d
+
+  ; Theme and color dynamic Finish page checkboxes if they are created
+  StrCmp $mui.FinishPage.Run "" +3
+    !insertmacro _CapscrThemeControl $mui.FinishPage.Run
+    SetCtlColors $mui.FinishPage.Run c4c4c4 0d0d0d
+  StrCmp $mui.FinishPage.ShowReadme "" +3
+    !insertmacro _CapscrThemeControl $mui.FinishPage.ShowReadme
+    SetCtlColors $mui.FinishPage.ShowReadme c4c4c4 0d0d0d
 FunctionEnd
 
 Function un.CapscrDarkenPage
   FindWindow $R0 "#32770" "" $HWNDPARENT
-  StrCmp $R0 "" +2 0
+  StrCmp $R0 "" +3 0
+    SetCtlColors $R0 c4c4c4 0d0d0d
     !insertmacro _CapscrThemeControl $R0
   System::Call 'USER32::GetDlgItem(p$R0,i1001)p.r1'
   !insertmacro _CapscrThemeControl $1
+  SetCtlColors $1 c4c4c4 0d0d0d
   System::Call 'USER32::GetDlgItem(p$R0,i1004)p.r1'
   !insertmacro _CapscrThemeControl $1
+  SetCtlColors $1 c4c4c4 0d0d0d
   System::Call 'USER32::GetDlgItem(p$R0,i1006)p.r1'
   !insertmacro _CapscrThemeControl $1
+  SetCtlColors $1 c4c4c4 0d0d0d
   System::Call 'USER32::GetDlgItem(p$R0,i1016)p.r1'
   !insertmacro _CapscrThemeControl $1
+  SetCtlColors $1 c4c4c4 0d0d0d
   System::Call 'USER32::GetDlgItem(p$R0,i1017)p.r1'
   !insertmacro _CapscrThemeControl $1
+  SetCtlColors $1 c4c4c4 0d0d0d
+  System::Call 'USER32::GetDlgItem(p$R0,i1019)p.r1'
+  !insertmacro _CapscrThemeControl $1
+  SetCtlColors $1 c4c4c4 0d0d0d
+  System::Call 'USER32::GetDlgItem(p$R0,i1020)p.r1'
+  !insertmacro _CapscrThemeControl $1
+  SetCtlColors $1 c4c4c4 0d0d0d
+  System::Call 'USER32::GetDlgItem(p$R0,i1023)p.r1'
+  !insertmacro _CapscrThemeControl $1
+  SetCtlColors $1 c4c4c4 0d0d0d
+  System::Call 'USER32::GetDlgItem(p$R0,i1024)p.r1'
+  !insertmacro _CapscrThemeControl $1
+  SetCtlColors $1 c4c4c4 0d0d0d
+  System::Call 'USER32::GetDlgItem(p$R0,i1034)p.r1'
+  !insertmacro _CapscrThemeControl $1
+  SetCtlColors $1 c4c4c4 0d0d0d
+  System::Call 'USER32::GetDlgItem(p$R0,i1036)p.r1'
+  !insertmacro _CapscrThemeControl $1
+  SetCtlColors $1 c4c4c4 0d0d0d
 FunctionEnd
 
 ; PRE hook that combines SkipIfPassive with darken-on-show. Used by every
