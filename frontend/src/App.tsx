@@ -256,15 +256,7 @@ function Hub() {
   const onClose = () => {
     if (!confirmDiscardEdits()) return;
     setConfigDirty(false);
-    const c = config();
-    // minimize instead of hide so the taskbar button stays and the jump list
-    // is accessible via right-click. Fall back to minimize if config isn't
-    // loaded yet — destroying the window forces a slow cold re-create.
-    if (!c || c.ui.minimize_to_tray) {
-      void win.minimize();
-    } else {
-      void win.close();
-    }
+    void win.close();
   };
 
   const runUpdate = async () => {
