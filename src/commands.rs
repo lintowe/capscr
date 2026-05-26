@@ -2258,7 +2258,7 @@ pub fn set_hotkeys_disabled(
 fn is_foreground_window_fullscreen() -> bool {
     use windows::Win32::UI::WindowsAndMessaging::{
         GetForegroundWindow, GetWindowRect, GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN,
-        GetShellWindow, GetDesktopWindow,
+        GetShellWindow, GetDesktopWindow, GetWindowLongW, GWL_STYLE, WS_CAPTION, IsZoomed,
     };
     use windows::Win32::Foundation::RECT;
 
@@ -2272,6 +2272,12 @@ fn is_foreground_window_fullscreen() -> bool {
         let shell = GetShellWindow();
         let desktop = GetDesktopWindow();
         if hwnd == shell || hwnd == desktop {
+            return false;
+        }
+
+        // Maximized windows or windows with a titlebar caption are NOT fullscreen games/apps
+        let style = GetWindowLongW(hwnd, GWL_STYLE) as u32;
+        if (style & WS_CAPTION.0) != 0 || IsZoomed(hwnd).as_bool() {
             return false;
         }
 
