@@ -11,7 +11,8 @@ default build stays small while the API surface stabilises.
 %APPDATA%\com.capscr.capscr\data\plugins\
     └─ <plugin-id>\
        ├─ plugin.toml      ; manifest, required
-       └─ plugin.wasm      ; module artefact, required when runtime.type = wasm
+       ├─ plugin.wasm      ; module artefact, required when runtime.type = wasm
+       └─ config.toml      ; optional, user-edited; exposed via config_get
 ```
 
 ## manifest schema
@@ -120,6 +121,8 @@ and logs a warning host-side instead of performing the action.
   (func $fetch (param i32 i32) (result i64)))      ; url ptr, len -> packed ptr/len
 (import "capscr" "fetch_post"
   (func $fetch_post (param i32 i32 i32 i32 i32 i32) (result i64))) ; url*, ctype*, body* -> packed
+(import "capscr" "config_get"
+  (func $config_get (param i32 i32) (result i64)))   ; key ptr, len -> packed value ptr/len
 ```
 
 ### `log(level, ptr, len)`
@@ -195,6 +198,28 @@ the https-only / blocked-port / SSRF guards, disabled redirects, the 1 MiB
 response cap, and the per-hook time budget. The request body is also capped at
 1 MiB.
 
+### `config_get(key_ptr, key_len) -> i64`
+
+Looks up `key` in the plugin's own config and writes the value into guest memory
+via `capscr_alloc`, returning the packed `(ptr << 32) | len`. Returns `0` if the
+key is absent (or the args are bad). Always available — no capability — since a
+plugin reading its own user-authored config is benign.
+
+The config lives at `<plugins-dir>/<plugin-id>/config.toml`, a flat table the
+**user** edits (the sandbox has no filesystem, so this is how a plugin receives
+settings — webhook URLs, styling, thresholds). The host reads it once at load
+and stringifies scalar values, e.g.:
+
+```toml
+webhook_url = "https://discord.com/api/webhooks/…"
+border_size = 8       # config_get("border_size") -> "8"
+enabled     = true    # -> "true"
+```
+
+Only scalars (string / integer / float / boolean) are exposed; arrays and
+sub-tables are skipped. The file is capped at 64 KiB; missing or unparseable
+config just means every key reads as absent.
+
 ## minimal Rust example
 
 ```rust
@@ -229,8 +254,8 @@ will load it at next launch.
 
 ## current limits + roadmap
 
-- host imports today: `log`, `clipboard_write_text`, `notify`, `fetch`. more
-  arrive incrementally
+- host imports today: `log`, `clipboard_write_text`, `notify`, `fetch`,
+  `fetch_post`, `config_get`. more arrive incrementally
 - `on_capture` receives full pixels and can cancel/replace; `fetch`/`fetch_post`
   cover HTTP(S) GET/POST (no custom headers beyond content-type yet)
   (POST for webhook-style plugins is not yet exposed)
