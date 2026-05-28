@@ -4,7 +4,8 @@ format follows [keep-a-changelog](https://keepachangelog.com/en/1.1.0/) loosely.
 
 ## [unreleased]
 
-nothing pending. drop ideas in github issues.
+### fixed
+- plugin dispatch no longer holds an exclusive lock across hook execution: a slow hook (e.g. a `fetch`/`fetch_post` in `on_upload_success`, bounded at 15s) could block a concurrent capture's `on_capture` dispatch and freeze the capture. `dispatch` now takes `&self` and `AppState` holds the plugin manager behind an `RwLock`, so independent events dispatch concurrently while each plugin still serialises its own calls via its store lock
 
 ## [0.5.0] — 2026-05-28
 

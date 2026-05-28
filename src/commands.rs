@@ -468,7 +468,7 @@ fn run_capture_pipeline_inner(
 
     let mut image = Arc::new(image);
     {
-        let mut plugin_manager = state.plugin_manager.lock().unwrap();
+        let plugin_manager = state.plugin_manager.read().unwrap();
         let event = PluginEvent::PostCapture {
             image: image.clone(),
             mode: capture_type,
@@ -1798,7 +1798,7 @@ pub fn notify_capture_saved(app: &AppHandle, path: &std::path::Path) {
         path.to_string_lossy().to_string(),
     );
     let state = app.state::<AppState>();
-    let mut pm = state.plugin_manager.lock().unwrap();
+    let pm = state.plugin_manager.read().unwrap();
     let _ = pm.dispatch(&PluginEvent::PostSave {
         path: path.to_path_buf(),
     });
@@ -1819,7 +1819,7 @@ pub fn emit_upload_success(app: &AppHandle, result: &crate::upload::UploadResult
         },
     );
     let state = app.state::<AppState>();
-    let mut pm = state.plugin_manager.lock().unwrap();
+    let pm = state.plugin_manager.read().unwrap();
     let _ = pm.dispatch(&PluginEvent::PostUpload {
         url: result.url.clone(),
     });
