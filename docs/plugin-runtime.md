@@ -118,6 +118,9 @@ packed as `(ptr << 32) | len`. A return value of `0` means failure or denial
 Requires `fetch = [...patterns...]`, where each pattern is matched against the
 full request URL: a trailing `*` is a prefix wildcard, otherwise it's an exact
 match (no regex, no path-segment globbing). The URL must be `http`/`https`.
+Patterns match on the raw string prefix, so include the path separator —
+`https://api.example.com/*` is host-scoped, but `https://api.example.com*` would
+also match `https://api.example.com.attacker.test/`.
 
 Safety bounds:
 
@@ -128,6 +131,9 @@ Safety bounds:
 - the response body is capped at 1 MiB
 - a single fetch is bounded by a 10s timeout; the per-hook epoch budget is
   refreshed afterwards so the plugin isn't trapped the instant it resumes
+- all fetches within one hook call share a 15s aggregate wall-clock budget, and
+  each call is shortened to whatever budget remains — so a fetch loop can't hold
+  the dispatch thread (and the plugin-manager lock) open indefinitely
 
 ## minimal Rust example
 

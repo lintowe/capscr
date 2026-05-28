@@ -42,6 +42,9 @@ struct HostState {
     plugin_id: String,
     caps: Capabilities,
     deadline_ticks: u64,
+    /// instant after which fetch is refused for the current hook call. set by
+    /// call_hook before each invocation; None outside a hook (fetch denied)
+    fetch_deadline: Option<std::time::Instant>,
 }
 
 /// capabilities a plugin declared in its `[capabilities]` manifest table,
@@ -91,8 +94,14 @@ const HOST_ERR_ARGS: i32 = -2; // ptr/len out of bounds or not valid utf-8
 const HOST_ERR_FAILED: i32 = -3; // the host-side operation itself failed
 
 /// wall-clock cap on a single plugin fetch. epoch interruption does not fire
-/// inside a blocking host call, so this is what actually bounds it
+/// inside a blocking host call, so this is what actually bounds one call
 const FETCH_TIMEOUT_SECS: u64 = 10;
+/// aggregate wall-clock budget for *all* fetches within a single hook call. the
+/// fetch import refreshes the epoch deadline after each blocking call (so a
+/// legitimate slow fetch isn't trapped on resume), which removes the per-hook
+/// epoch backstop — this budget is what re-bounds a fetch loop so a plugin can't
+/// hold the dispatch thread (and the plugin-manager lock) indefinitely
+const FETCH_HOOK_BUDGET: std::time::Duration = std::time::Duration::from_secs(15);
 /// hard cap on a fetched response body so a plugin can't exhaust host memory
 const FETCH_MAX_BYTES: usize = 1 << 20;
 
@@ -164,6 +173,7 @@ impl WasmHost {
                 plugin_id: manifest.plugin.id.clone(),
                 caps: Capabilities::from_manifest(&manifest.capabilities),
                 deadline_ticks,
+                fetch_deadline: None,
             },
         );
         if let Some(limit) = runtime.memory_max_bytes {
@@ -299,7 +309,26 @@ impl WasmHost {
                         );
                         return 0;
                     }
-                    let body = match host_fetch(&url) {
+                    // enforce the aggregate per-hook fetch budget, and bound this
+                    // single call to whatever budget remains (capped at the
+                    // per-call timeout). without this a fetch loop could block the
+                    // dispatch thread indefinitely, since we refresh the epoch
+                    // deadline after each call below
+                    let remaining = caller
+                        .data()
+                        .fetch_deadline
+                        .map(|dl| dl.saturating_duration_since(std::time::Instant::now()))
+                        .unwrap_or_default();
+                    if remaining.is_zero() {
+                        tracing::warn!(
+                            plugin = %caller.data().plugin_id,
+                            "fetch denied: per-hook fetch time budget exhausted"
+                        );
+                        return 0;
+                    }
+                    let timeout =
+                        remaining.min(std::time::Duration::from_secs(FETCH_TIMEOUT_SECS));
+                    let body = match host_fetch(&url, timeout) {
                         Ok(b) => b,
                         Err(e) => {
                             tracing::warn!(plugin = %caller.data().plugin_id, "fetch {url} failed: {e}");
@@ -405,6 +434,8 @@ impl WasmPlugin {
         let _ = store.set_fuel(DEFAULT_HOOK_FUEL);
         let deadline = store.data().deadline_ticks;
         store.set_epoch_deadline(deadline);
+        // start the aggregate fetch budget for this hook invocation
+        store.data_mut().fetch_deadline = Some(std::time::Instant::now() + FETCH_HOOK_BUDGET);
 
         let bytes = payload.as_bytes();
         let len = bytes.len() as i32;
@@ -469,8 +500,8 @@ fn read_guest_str(caller: &mut Caller<'_, HostState>, ptr: i32, len: i32) -> Opt
 
 /// blocking HTTP(S) GET behind the same SSRF guard the upload path uses.
 /// redirects are disabled so a 30x to a private IP can't slip past the initial
-/// host check; the body is capped at FETCH_MAX_BYTES
-fn host_fetch(url: &str) -> Result<Vec<u8>> {
+/// host check; the body is capped at FETCH_MAX_BYTES and the call at `timeout`
+fn host_fetch(url: &str, timeout: std::time::Duration) -> Result<Vec<u8>> {
     use std::io::Read;
 
     let parsed = url::Url::parse(url).map_err(|e| anyhow!("bad url: {e}"))?;
@@ -485,7 +516,7 @@ fn host_fetch(url: &str) -> Result<Vec<u8>> {
     crate::upload::validate_resolved_host(host, port)?;
 
     let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(FETCH_TIMEOUT_SECS))
+        .timeout(timeout)
         .redirect(reqwest::redirect::Policy::none())
         .build()?;
     let resp = client.get(url).send()?;
