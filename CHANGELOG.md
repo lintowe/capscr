@@ -8,6 +8,7 @@ format follows [keep-a-changelog](https://keepachangelog.com/en/1.1.0/) loosely.
 - **image-blob plugin API**: the `on_capture` hook now receives the captured pixels (`[width][height][mode][rgba]`) and returns an `i64` — `0` continue, `<0` cancel the capture, `>0` a packed `ptr/len` of a replacement image. plugins can observe, drop, or rewrite a capture before it's saved/copied/uploaded, and replacements compose across plugins in load order
 - new `image` capability gates it: `["read"]` to receive pixels, `["read","modify"]` to honour cancel/replace; without it `on_capture` isn't called. replacement images are validated (`len == 8 + w*h*4`, dims ≤ 16384, ≤ 256 MB) and anything malformed is ignored so a buggy plugin can't drop or corrupt a capture
 - end-to-end WAT tests cover continue / cancel / replace and every capability-gating case
+- new `fetch_post` host import (POST sibling of `fetch`) so webhook-style plugins (Discord/Slack notifiers, pastebin) can send a body + content-type. shares the `fetch` capability, the https-only/blocked-port/SSRF guards, disabled redirects, the per-hook time budget, and 1 MiB request/response caps
 
 ### fixed
 - the plugins tab now lists installed WASM plugins: `list_installed_plugins` parsed only the legacy flat `plugin.toml` schema, so a sectioned runtime manifest (the form real WASM plugins use, with `name` under `[plugin]`) failed to parse and the plugin was silently dropped from the list. it now reads the sectioned schema first and falls back to the flat one, so both modern and legacy manifests appear
