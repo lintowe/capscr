@@ -963,8 +963,8 @@ pub fn list_captures(state: State<AppState>) -> Result<Vec<HistoryEntry>, String
             .unwrap_or(false);
 
         let path_str = path.to_string_lossy().to_string();
-        let path_clean = if path_str.starts_with(r"\\?\") {
-            path_str[4..].to_string()
+        let path_clean = if let Some(stripped) = path_str.strip_prefix(r"\\?\") {
+            stripped.to_string()
         } else {
             path_str
         };

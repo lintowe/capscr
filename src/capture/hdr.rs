@@ -875,7 +875,7 @@ mod windows_hdr {
             );
 
             context.ClearState();
-            let _ = context.Flush();
+            context.Flush();
 
             Ok((data, width, height, hdr_format))
         }
@@ -929,7 +929,7 @@ mod windows_hdr {
             while let Ok(adapter) = factory.EnumAdapters1(adapter_idx) {
                 let mut output_idx = 0u32;
                 let mut has_outputs = false;
-                while let Ok(_) = adapter.EnumOutputs(output_idx) {
+                while adapter.EnumOutputs(output_idx).is_ok() {
                     has_outputs = true;
                     output_idx += 1;
                 }
@@ -947,7 +947,7 @@ mod windows_hdr {
                     };
                     let cache_mutex = DEVICE_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
                     let mut cache = cache_mutex.lock().unwrap();
-                    if !cache.contains_key(&luid) {
+                    if let std::collections::hash_map::Entry::Vacant(e) = cache.entry(luid) {
                         let mut device: Option<ID3D11Device> = None;
                         let mut context: Option<ID3D11DeviceContext> = None;
                         use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_UNKNOWN;
@@ -966,7 +966,7 @@ mod windows_hdr {
                             Some(&mut context),
                         ).is_ok() {
                             if let (Some(dev), Some(ctx)) = (device, context) {
-                                cache.insert(luid, (dev, ctx));
+                                e.insert((dev, ctx));
                             }
                         }
                     }
