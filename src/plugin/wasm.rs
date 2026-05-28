@@ -61,6 +61,11 @@ struct HostState {
     /// instant after which fetch is refused for the current hook call. set by
     /// call_hook before each invocation; None outside a hook (fetch denied)
     fetch_deadline: Option<std::time::Instant>,
+    /// flat key→string config read from <plugin_dir>/config.toml at load time,
+    /// surfaced to the plugin via the config_get host import. the sandbox has no
+    /// filesystem, so this is how a plugin gets user-authored settings (webhook
+    /// urls, styling, …) without a native fs
+    config: std::collections::HashMap<String, String>,
 }
 
 /// capabilities a plugin declared in its `[capabilities]` manifest table,
@@ -129,6 +134,9 @@ const FETCH_MAX_BYTES: usize = 1 << 20;
 const MAX_CAPTURE_BLOB_BYTES: usize = 256 * 1024 * 1024;
 /// max width/height for a plugin-returned replacement image
 const MAX_CAPTURE_DIM: u32 = 16384;
+/// cap on <plugin_dir>/config.toml so a malicious marketplace plugin can't ship
+/// a huge config to bloat host memory at load
+const MAX_CONFIG_BYTES: u64 = 64 * 1024;
 /// ports a plugin fetch may not target, mirroring the custom-upload destination
 /// guard — non-web services where even a refused https probe leaks reachability
 const FETCH_BLOCKED_PORTS: &[u16] = &[0, 22, 23, 25, 110, 143, 445, 3306, 3389, 5432, 6379, 27017];
@@ -195,6 +203,8 @@ impl WasmHost {
             .map(|ms| (ms / 10).max(1))
             .unwrap_or(50);
 
+        let config = load_plugin_config(plugin_dir);
+
         let mut store = Store::new(
             &self.engine,
             HostState {
@@ -202,6 +212,7 @@ impl WasmHost {
                 caps: Capabilities::from_manifest(&manifest.capabilities),
                 deadline_ticks,
                 fetch_deadline: None,
+                config,
             },
         );
         if let Some(limit) = runtime.memory_max_bytes {
@@ -448,6 +459,29 @@ impl WasmHost {
             )
             .map_err(|e| anyhow!("link capscr.fetch_post: {e}"))?;
 
+        // host import: capscr.config_get(key_ptr, key_len) -> i64
+        // looks up a key in the plugin's config.toml (loaded at startup) and
+        // writes the value into guest memory via capscr_alloc, returning the
+        // packed (ptr<<32)|len. 0 if the key is absent or args are bad. always
+        // available — a plugin reading its own user-authored config is benign.
+        linker
+            .func_wrap(
+                "capscr",
+                "config_get",
+                |mut caller: Caller<'_, HostState>, key_ptr: i32, key_len: i32| -> i64 {
+                    let key = match read_guest_str(&mut caller, key_ptr, key_len) {
+                        Some(s) => s,
+                        None => return 0,
+                    };
+                    let value = match caller.data().config.get(&key) {
+                        Some(v) => v.clone(),
+                        None => return 0,
+                    };
+                    write_guest_response(&mut caller, value.as_bytes())
+                },
+            )
+            .map_err(|e| anyhow!("link capscr.config_get: {e}"))?;
+
         let instance = linker
             .instantiate(&mut store, &module)
             .map_err(|e| anyhow!("instantiating: {e}"))?;
@@ -655,6 +689,48 @@ fn read_capture_image(mem: &[u8], ptr: usize, len: usize) -> Option<RgbaImage> {
         return None;
     }
     RgbaImage::from_raw(w, h, blob[8..].to_vec())
+}
+
+/// read <plugin_dir>/config.toml into a flat key→string map for config_get.
+/// scalar values (string/int/float/bool) are stringified; arrays/tables/dates
+/// are skipped. missing/oversized/unparseable file → empty map (config_get then
+/// returns "absent" for every key). the host reads this — the sandbox can't.
+fn load_plugin_config(plugin_dir: &Path) -> std::collections::HashMap<String, String> {
+    let mut out = std::collections::HashMap::new();
+    let path = plugin_dir.join("config.toml");
+    let meta = match std::fs::metadata(&path) {
+        Ok(m) => m,
+        Err(_) => return out, // no config file is the common case
+    };
+    if meta.len() > MAX_CONFIG_BYTES {
+        tracing::warn!("plugin config.toml at {} exceeds cap; ignoring", path.display());
+        return out;
+    }
+    let raw = match std::fs::read_to_string(&path) {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::warn!("reading {}: {e}", path.display());
+            return out;
+        }
+    };
+    let table: toml::Table = match toml::from_str(&raw) {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::warn!("parsing {}: {e}", path.display());
+            return out;
+        }
+    };
+    for (k, v) in table {
+        let s = match v {
+            toml::Value::String(s) => s,
+            toml::Value::Integer(i) => i.to_string(),
+            toml::Value::Float(f) => f.to_string(),
+            toml::Value::Boolean(b) => b.to_string(),
+            _ => continue, // skip arrays/tables/datetime — flat scalars only
+        };
+        out.insert(k, s);
+    }
+    out
 }
 
 struct MemLimiter {
@@ -1181,5 +1257,129 @@ mod tests {
             p.call_capture_hook(&sample_blob()).unwrap(),
             CaptureOutcome::Continue
         ));
+    }
+
+    // ---- config_get tests ----
+
+    #[test]
+    fn load_plugin_config_stringifies_scalars_and_skips_compound() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join("config.toml"),
+            "webhook = \"https://x\"\nsize = 8\nratio = 1.5\non = true\narr = [1, 2]\n",
+        )
+        .expect("write config");
+        let cfg = load_plugin_config(dir.path());
+        assert_eq!(cfg.get("webhook").map(String::as_str), Some("https://x"));
+        assert_eq!(cfg.get("size").map(String::as_str), Some("8"));
+        assert_eq!(cfg.get("ratio").map(String::as_str), Some("1.5"));
+        assert_eq!(cfg.get("on").map(String::as_str), Some("true"));
+        assert!(!cfg.contains_key("arr"), "arrays are skipped");
+    }
+
+    #[test]
+    fn load_plugin_config_missing_is_empty() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        assert!(load_plugin_config(dir.path()).is_empty());
+    }
+
+    #[test]
+    fn config_get_returns_value_to_guest() {
+        // the hook calls config_get("wkey", 4) and stores the packed ptr/len at
+        // offset 0. the host wrote the value via capscr_alloc (offset 1024).
+        const CFG_WAT: &str = r#"
+            (module
+              (import "capscr" "config_get" (func $cfg (param i32 i32) (result i64)))
+              (memory (export "memory") 1)
+              (data (i32.const 100) "wkey")
+              (func (export "capscr_alloc") (param i32) (result i32) (i32.const 1024))
+              (func (export "capscr_on_capture_saved") (param i32 i32)
+                (i64.store (i32.const 0) (call $cfg (i32.const 100) (i32.const 4)))))
+        "#;
+        let wasm = wat::parse_str(CFG_WAT).expect("wat compiles");
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("plugin.wasm"), &wasm).expect("write wasm");
+        std::fs::write(dir.path().join("config.toml"), "wkey = \"hello\"\n").expect("write config");
+        let manifest = PluginManifest {
+            plugin: PluginMeta {
+                id: "test".into(),
+                name: "Test".into(),
+                version: "1.0.0".into(),
+                author: None,
+                description: None,
+            },
+            runtime: Some(RuntimeSpec {
+                runtime_type: "wasm".into(),
+                file: "plugin.wasm".into(),
+                memory_max_bytes: None,
+                time_slice_ms: None,
+            }),
+            hooks: [(
+                "on_capture_saved".to_string(),
+                "capscr_on_capture_saved".to_string(),
+            )]
+            .into_iter()
+            .collect(),
+            capabilities: HashMap::new(),
+            enabled: true,
+        };
+        let host = WasmHost::new().expect("host");
+        let plugin = host.load(dir.path(), &manifest).expect("load");
+        plugin
+            .call_hook("on_capture_saved", "x")
+            .expect("hook runs");
+        let guard = plugin.store.lock().unwrap();
+        let mem = plugin.memory.data(&*guard);
+        let packed = i64::from_le_bytes(mem[0..8].try_into().unwrap());
+        let ptr = ((packed as u64) >> 32) as usize;
+        let len = (packed as u64 & 0xffff_ffff) as usize;
+        assert_eq!(&mem[ptr..ptr + len], b"hello");
+    }
+
+    #[test]
+    fn config_get_absent_key_returns_zero() {
+        const CFG_WAT: &str = r#"
+            (module
+              (import "capscr" "config_get" (func $cfg (param i32 i32) (result i64)))
+              (memory (export "memory") 1)
+              (data (i32.const 100) "nope")
+              (func (export "capscr_alloc") (param i32) (result i32) (i32.const 1024))
+              (func (export "capscr_on_capture_saved") (param i32 i32)
+                (i64.store (i32.const 0) (call $cfg (i32.const 100) (i32.const 4)))))
+        "#;
+        let wasm = wat::parse_str(CFG_WAT).expect("wat compiles");
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("plugin.wasm"), &wasm).expect("write wasm");
+        // no config.toml at all → every key absent
+        let manifest = PluginManifest {
+            plugin: PluginMeta {
+                id: "test".into(),
+                name: "Test".into(),
+                version: "1.0.0".into(),
+                author: None,
+                description: None,
+            },
+            runtime: Some(RuntimeSpec {
+                runtime_type: "wasm".into(),
+                file: "plugin.wasm".into(),
+                memory_max_bytes: None,
+                time_slice_ms: None,
+            }),
+            hooks: [(
+                "on_capture_saved".to_string(),
+                "capscr_on_capture_saved".to_string(),
+            )]
+            .into_iter()
+            .collect(),
+            capabilities: HashMap::new(),
+            enabled: true,
+        };
+        let host = WasmHost::new().expect("host");
+        let plugin = host.load(dir.path(), &manifest).expect("load");
+        plugin.call_hook("on_capture_saved", "x").expect("hook runs");
+        let guard = plugin.store.lock().unwrap();
+        let mem = plugin.memory.data(&*guard);
+        let packed = i64::from_le_bytes(mem[0..8].try_into().unwrap());
+        assert_eq!(packed, 0, "absent key must return 0");
     }
 }
