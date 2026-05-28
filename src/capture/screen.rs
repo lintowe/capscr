@@ -122,7 +122,6 @@ impl ScreenCapture {
             let is_hdr = HdrCapture::is_hdr_at_point(center.0, center.1);
             let use_cpu_hdr = is_hdr && !wgc_on;
             let use_wgc = wgc_on;
-            let use_d2d = false;
             let gdi_capture = || {
                 match super::fast_gdi_capture(monitor.x, monitor.y, monitor.width, monitor.height) {
                     Ok(img) => Ok(img),
@@ -149,9 +148,6 @@ impl ScreenCapture {
                     })
             } else if use_wgc {
                 let r = super::wgc_capture_at_point(center.0, center.1);
-                r.or_else(|_| gdi_capture())
-            } else if use_d2d {
-                let r = super::d2d_capture_at_point(Some(center));
                 r.or_else(|_| gdi_capture())
             } else {
                 gdi_capture()
