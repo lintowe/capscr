@@ -151,8 +151,12 @@ impl PluginManager {
         Ok(())
     }
 
+    // &self (not &mut): dispatch only reads self.loaded; each plugin serialises
+    // its own calls via its store mutex. this lets the caller hold a shared
+    // (read) lock so a slow hook (e.g. a webhook fetch in on_upload_success)
+    // doesn't block a concurrent capture's on_capture dispatch.
     #[cfg(feature = "plugin-runtime")]
-    pub fn dispatch(&mut self, event: &PluginEvent) -> PluginResponse {
+    pub fn dispatch(&self, event: &PluginEvent) -> PluginResponse {
         // PostCapture has a richer pipeline (pixels in, cancel/replace out);
         // the notify events are fire-and-forget string payloads
         if let PluginEvent::PostCapture { image, mode } = event {
@@ -198,7 +202,7 @@ impl PluginManager {
     }
 
     #[cfg(not(feature = "plugin-runtime"))]
-    pub fn dispatch(&mut self, _event: &PluginEvent) -> PluginResponse {
+    pub fn dispatch(&self, _event: &PluginEvent) -> PluginResponse {
         PluginResponse::Continue
     }
 }

@@ -7,7 +7,7 @@ use crossbeam_channel::Sender;
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
-use std::sync::Mutex;
+use std::sync::{Mutex, RwLock};
 
 const RECENT_UPLOADS_CAP: usize = 5;
 
@@ -26,7 +26,10 @@ pub enum HotkeyStatus {
 
 pub struct AppState {
     pub config: Mutex<Config>,
-    pub plugin_manager: Mutex<PluginManager>,
+    // RwLock (not Mutex): dispatch takes &self and only reads, so concurrent
+    // dispatches share a read lock — a slow hook can't block another event's
+    // dispatch. load_all runs once at startup before this lock is constructed.
+    pub plugin_manager: RwLock<PluginManager>,
     // human-readable plugin load failures captured at startup (load_all runs
     // once in new()); surfaced to the plugins tab via the plugin_load_errors
     // command so a broken plugin isn't a silent no-op
@@ -67,7 +70,7 @@ impl AppState {
         let disabled = config.hotkeys.disabled_globally;
         Self {
             config: Mutex::new(config),
-            plugin_manager: Mutex::new(plugin_manager),
+            plugin_manager: RwLock::new(plugin_manager),
             plugin_load_errors: Mutex::new(load_errors),
             hotkey_tx: Mutex::new(None),
             gif_recorder: Mutex::new(None),
