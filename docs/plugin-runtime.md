@@ -118,6 +118,8 @@ and logs a warning host-side instead of performing the action.
   (func $notify (param i32 i32 i32 i32) (result i32)))         ; title*, body* -> code
 (import "capscr" "fetch"
   (func $fetch (param i32 i32) (result i64)))      ; url ptr, len -> packed ptr/len
+(import "capscr" "fetch_post"
+  (func $fetch_post (param i32 i32 i32 i32 i32 i32) (result i64))) ; url*, ctype*, body* -> packed
 ```
 
 ### `log(level, ptr, len)`
@@ -181,6 +183,18 @@ Safety bounds:
   each call is shortened to whatever budget remains — so a fetch loop can't hold
   the dispatch thread (and the plugin-manager lock) open indefinitely
 
+### `fetch_post(url_ptr, url_len, ctype_ptr, ctype_len, body_ptr, body_len) -> i64`
+
+POST sibling of `fetch`, for webhook-style plugins (Discord/Slack notifiers,
+pastebin uploads). Sends `body` with the given content-type and returns the
+response body packed as `(ptr << 32) | len`, `0` on failure/denial — same as
+`fetch`. Pass `ctype_len = 0` to omit the content-type header.
+
+It shares everything with `fetch`: the `fetch` capability + URL-pattern match,
+the https-only / blocked-port / SSRF guards, disabled redirects, the 1 MiB
+response cap, and the per-hook time budget. The request body is also capped at
+1 MiB.
+
 ## minimal Rust example
 
 ```rust
@@ -217,7 +231,8 @@ will load it at next launch.
 
 - host imports today: `log`, `clipboard_write_text`, `notify`, `fetch`. more
   arrive incrementally
-- `on_capture` receives full pixels and can cancel/replace; `fetch` is GET-only
+- `on_capture` receives full pixels and can cancel/replace; `fetch`/`fetch_post`
+  cover HTTP(S) GET/POST (no custom headers beyond content-type yet)
   (POST for webhook-style plugins is not yet exposed)
 - capabilities for `clipboard`, `notifications`, `fetch`, and `image` are
   enforced; other declared capabilities are still informational

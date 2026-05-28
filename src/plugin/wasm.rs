@@ -356,7 +356,7 @@ impl WasmHost {
                     }
                     let timeout =
                         remaining.min(std::time::Duration::from_secs(FETCH_TIMEOUT_SECS));
-                    let body = match host_fetch(&url, timeout) {
+                    let body = match host_request(HttpMethod::Get, &url, None, None, timeout) {
                         Ok(b) => b,
                         Err(e) => {
                             tracing::warn!(plugin = %caller.data().plugin_id, "fetch {url} failed: {e}");
@@ -369,39 +369,84 @@ impl WasmHost {
                     let deadline = caller.data().deadline_ticks;
                     caller.as_context_mut().set_epoch_deadline(deadline);
 
-                    let len = body.len();
-                    if len > i32::MAX as usize {
-                        return 0;
-                    }
-                    let alloc = match caller
-                        .get_export("capscr_alloc")
-                        .and_then(|e| e.into_func())
-                    {
-                        Some(f) => f,
-                        None => return 0,
-                    };
-                    let alloc = match alloc.typed::<i32, i32>(&caller) {
-                        Ok(f) => f,
-                        Err(_) => return 0,
-                    };
-                    let ptr = match alloc.call(&mut caller, len as i32) {
-                        Ok(p) => p,
-                        Err(_) => return 0,
-                    };
-                    if ptr <= 0 {
-                        return 0;
-                    }
-                    let mem = match caller.get_export("memory").and_then(|e| e.into_memory()) {
-                        Some(m) => m,
-                        None => return 0,
-                    };
-                    if mem.write(&mut caller, ptr as usize, &body).is_err() {
-                        return 0;
-                    }
-                    ((ptr as i64) << 32) | (len as i64 & 0xffff_ffff)
+                    write_guest_response(&mut caller, &body)
                 },
             )
             .map_err(|e| anyhow!("link capscr.fetch: {e}"))?;
+
+        // host import: capscr.fetch_post(url*, content_type*, body*) -> i64
+        // POST sibling of fetch for webhook-style plugins. same fetch capability,
+        // SSRF/https/port guards, per-hook budget, and packed-i64 response.
+        linker
+            .func_wrap(
+                "capscr",
+                "fetch_post",
+                |mut caller: Caller<'_, HostState>,
+                 url_ptr: i32,
+                 url_len: i32,
+                 ct_ptr: i32,
+                 ct_len: i32,
+                 body_ptr: i32,
+                 body_len: i32|
+                 -> i64 {
+                    let url = match read_guest_str(&mut caller, url_ptr, url_len) {
+                        Some(s) => s,
+                        None => return 0,
+                    };
+                    if !caller.data().caps.fetch_allowed(&url) {
+                        tracing::warn!(
+                            plugin = %caller.data().plugin_id,
+                            "fetch_post denied: {url} not in declared fetch capability"
+                        );
+                        return 0;
+                    }
+                    let content_type = if ct_len > 0 {
+                        read_guest_str(&mut caller, ct_ptr, ct_len)
+                    } else {
+                        None
+                    };
+                    let req_body = match read_guest_bytes(&mut caller, body_ptr, body_len) {
+                        Some(b) => b,
+                        None => return 0,
+                    };
+                    if req_body.len() > FETCH_MAX_BYTES {
+                        tracing::warn!(plugin = %caller.data().plugin_id, "fetch_post body too large");
+                        return 0;
+                    }
+                    let remaining = caller
+                        .data()
+                        .fetch_deadline
+                        .map(|dl| dl.saturating_duration_since(std::time::Instant::now()))
+                        .unwrap_or_default();
+                    if remaining.is_zero() {
+                        tracing::warn!(
+                            plugin = %caller.data().plugin_id,
+                            "fetch_post denied: per-hook fetch time budget exhausted"
+                        );
+                        return 0;
+                    }
+                    let timeout =
+                        remaining.min(std::time::Duration::from_secs(FETCH_TIMEOUT_SECS));
+                    let resp = match host_request(
+                        HttpMethod::Post,
+                        &url,
+                        content_type.as_deref(),
+                        Some(&req_body),
+                        timeout,
+                    ) {
+                        Ok(b) => b,
+                        Err(e) => {
+                            tracing::warn!(plugin = %caller.data().plugin_id, "fetch_post {url} failed: {e}");
+                            return 0;
+                        }
+                    };
+                    let deadline = caller.data().deadline_ticks;
+                    caller.as_context_mut().set_epoch_deadline(deadline);
+
+                    write_guest_response(&mut caller, &resp)
+                },
+            )
+            .map_err(|e| anyhow!("link capscr.fetch_post: {e}"))?;
 
         let instance = linker
             .instantiate(&mut store, &module)
@@ -659,7 +704,22 @@ fn read_guest_str(caller: &mut Caller<'_, HostState>, ptr: i32, len: i32) -> Opt
 /// blocking HTTP(S) GET behind the same SSRF guard the upload path uses.
 /// redirects are disabled so a 30x to a private IP can't slip past the initial
 /// host check; the body is capped at FETCH_MAX_BYTES and the call at `timeout`
-fn host_fetch(url: &str, timeout: std::time::Duration) -> Result<Vec<u8>> {
+#[derive(Clone, Copy)]
+enum HttpMethod {
+    Get,
+    Post,
+}
+
+/// blocking HTTP(S) request behind the upload path's SSRF guard, shared by the
+/// fetch (GET) and fetch_post (POST) imports. https only, non-web ports refused,
+/// redirects disabled, response capped at FETCH_MAX_BYTES.
+fn host_request(
+    method: HttpMethod,
+    url: &str,
+    content_type: Option<&str>,
+    body: Option<&[u8]>,
+    timeout: std::time::Duration,
+) -> Result<Vec<u8>> {
     use std::io::Read;
 
     let parsed = url::Url::parse(url).map_err(|e| anyhow!("bad url: {e}"))?;
@@ -679,13 +739,70 @@ fn host_fetch(url: &str, timeout: std::time::Duration) -> Result<Vec<u8>> {
         .timeout(timeout)
         .redirect(reqwest::redirect::Policy::none())
         .build()?;
-    let resp = client.get(url).send()?;
+    let mut req = match method {
+        HttpMethod::Get => client.get(url),
+        HttpMethod::Post => client.post(url),
+    };
+    if let Some(b) = body {
+        req = req.body(b.to_vec());
+    }
+    if let Some(ct) = content_type {
+        req = req.header(reqwest::header::CONTENT_TYPE, ct);
+    }
+    let resp = req.send()?;
     if !resp.status().is_success() {
         return Err(anyhow!("http status {}", resp.status()));
     }
     let mut buf = Vec::new();
     resp.take(FETCH_MAX_BYTES as u64).read_to_end(&mut buf)?;
     Ok(buf)
+}
+
+/// read raw bytes out of guest memory at (ptr,len). None on oob/negative.
+fn read_guest_bytes(caller: &mut Caller<'_, HostState>, ptr: i32, len: i32) -> Option<Vec<u8>> {
+    if ptr < 0 || len < 0 {
+        return None;
+    }
+    let mem = caller.get_export("memory").and_then(|e| e.into_memory())?;
+    let data = mem.data(&caller);
+    let start = ptr as usize;
+    let end = start.checked_add(len as usize)?;
+    if end > data.len() {
+        return None;
+    }
+    Some(data[start..end].to_vec())
+}
+
+/// allocate space in the guest via capscr_alloc, copy `body` there, and return
+/// the packed (ptr<<32)|len. 0 on any failure. shared by fetch and fetch_post.
+fn write_guest_response(caller: &mut Caller<'_, HostState>, body: &[u8]) -> i64 {
+    if body.len() > i32::MAX as usize {
+        return 0;
+    }
+    let len = body.len() as i32;
+    let alloc = match caller.get_export("capscr_alloc").and_then(|e| e.into_func()) {
+        Some(f) => f,
+        None => return 0,
+    };
+    let alloc = match alloc.typed::<i32, i32>(&*caller) {
+        Ok(f) => f,
+        Err(_) => return 0,
+    };
+    let ptr = match alloc.call(&mut *caller, len) {
+        Ok(p) => p,
+        Err(_) => return 0,
+    };
+    if ptr <= 0 {
+        return 0;
+    }
+    let mem = match caller.get_export("memory").and_then(|e| e.into_memory()) {
+        Some(m) => m,
+        None => return 0,
+    };
+    if mem.write(&mut *caller, ptr as usize, body).is_err() {
+        return 0;
+    }
+    ((ptr as i64) << 32) | (len as i64 & 0xffff_ffff)
 }
 
 #[cfg(test)]
@@ -733,37 +850,57 @@ mod tests {
         assert!(!caps.fetch_allowed("https://api.example.com/"));
     }
 
-    // both of these reject at the scheme/port check before any network call,
-    // so they're deterministic and offline
+    // these reject at the scheme/port/SSRF check before any network call, so
+    // they're deterministic and offline — and they exercise both methods, since
+    // fetch (GET) and fetch_post (POST) share host_request's guards
+    const SECOND: std::time::Duration = std::time::Duration::from_secs(1);
+
     #[test]
-    fn host_fetch_rejects_non_https() {
-        let err = host_fetch("http://example.com/", std::time::Duration::from_secs(1))
+    fn host_request_rejects_non_https() {
+        let err = host_request(HttpMethod::Get, "http://example.com/", None, None, SECOND)
             .unwrap_err()
             .to_string();
         assert!(err.contains("https"), "expected https rejection, got: {err}");
     }
 
     #[test]
-    fn host_fetch_rejects_blocked_port() {
-        let err = host_fetch("https://example.com:22/", std::time::Duration::from_secs(1))
+    fn host_request_rejects_blocked_port() {
+        let err = host_request(HttpMethod::Get, "https://example.com:22/", None, None, SECOND)
             .unwrap_err()
             .to_string();
         assert!(err.contains("port"), "expected blocked-port rejection, got: {err}");
     }
 
     #[test]
-    fn host_fetch_rejects_loopback() {
-        // proves the SSRF guard is actually wired into fetch: a loopback literal
-        // is rejected by validate_resolved_host before any DNS or network, so
-        // this stays deterministic and offline. the guard phrases loopback as
-        // "host not allowed", private ranges as "private ... blocked"
-        let err = host_fetch("https://127.0.0.1/", std::time::Duration::from_secs(1))
+    fn host_request_rejects_loopback() {
+        // proves the SSRF guard is wired in: a loopback literal is rejected by
+        // validate_resolved_host before any DNS or network. the guard phrases
+        // loopback as "host not allowed", private ranges as "private ... blocked"
+        let err = host_request(HttpMethod::Get, "https://127.0.0.1/", None, None, SECOND)
             .unwrap_err()
             .to_string()
             .to_lowercase();
         assert!(
             err.contains("not allowed") || err.contains("private") || err.contains("blocked"),
             "expected SSRF rejection, got: {err}"
+        );
+    }
+
+    #[test]
+    fn host_request_post_uses_the_same_ssrf_guard() {
+        let err = host_request(
+            HttpMethod::Post,
+            "https://127.0.0.1/hook",
+            Some("application/json"),
+            Some(b"{}"),
+            SECOND,
+        )
+        .unwrap_err()
+        .to_string()
+        .to_lowercase();
+        assert!(
+            err.contains("not allowed") || err.contains("private") || err.contains("blocked"),
+            "expected SSRF rejection for POST, got: {err}"
         );
     }
 
