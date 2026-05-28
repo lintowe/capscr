@@ -22,11 +22,12 @@ mod windows_impl {
             Foundation::{BOOL, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
             Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_EXTENDED_FRAME_BOUNDS},
             Graphics::Gdi::{
-                AlphaBlend, BeginPaint, BitBlt, CreateCompatibleBitmap, CreateCompatibleDC,
+                AlphaBlend, BeginPaint, BitBlt, CreateCompatibleDC,
                 CreatePen, CreateSolidBrush, DeleteDC, DeleteObject, EndPaint, FillRect, GetDC,
                 GetStockObject, InvalidateRect, ReleaseDC, SelectObject, SetBkColor, SetBkMode,
                 SetTextColor, StretchBlt, TextOutW, AC_SRC_OVER, BLENDFUNCTION, HBITMAP, HDC,
-                HOLLOW_BRUSH, OPAQUE, PAINTSTRUCT, PS_SOLID, SRCCOPY, TRANSPARENT,
+                HOLLOW_BRUSH, OPAQUE, PAINTSTRUCT, PS_SOLID, SRCCOPY, TRANSPARENT, CAPTUREBLT,
+                CreateDIBSection, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS,
                 Rectangle as GdiRectangle,
             },
             System::LibraryLoader::GetModuleHandleW,
@@ -259,6 +260,31 @@ mod windows_impl {
         Some(hbmp)
     }
 
+    fn create_32bpp_dib(width: i32, height: i32) -> Option<HBITMAP> {
+        let mut bi: BITMAPINFO = unsafe { std::mem::zeroed() };
+        bi.bmiHeader = BITMAPINFOHEADER {
+            biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+            biWidth: width,
+            biHeight: -height, // top-down
+            biPlanes: 1,
+            biBitCount: 32,
+            biCompression: BI_RGB.0,
+            ..Default::default()
+        };
+        let mut bits_ptr: *mut std::ffi::c_void = std::ptr::null_mut();
+        unsafe {
+            CreateDIBSection(
+                HDC::default(),
+                &bi,
+                DIB_RGB_COLORS,
+                &mut bits_ptr,
+                None,
+                0,
+            )
+        }
+        .ok()
+    }
+
     pub fn select(frozen_frame: Option<std::sync::Arc<image::RgbaImage>>) -> SelectionResult {
         // single-flight: the windows_impl module backs the entire selector with
         // process-wide statics (START_X / SCREEN_BITMAP / etc.). A second
@@ -306,22 +332,22 @@ mod windows_impl {
                     if let Some(hbmp) = create_gdi_bitmap_from_image(frozen) {
                         (hbmp, false)
                     } else {
-                        (CreateCompatibleBitmap(screen_dc, virt_width, virt_height), true)
+                        (create_32bpp_dib(virt_width, virt_height).unwrap_or_default(), true)
                     }
                 } else {
-                    (CreateCompatibleBitmap(screen_dc, virt_width, virt_height), true)
+                    (create_32bpp_dib(virt_width, virt_height).unwrap_or_default(), true)
                 };
 
                 if !bitmap.is_invalid() {
                     let old_bitmap = SelectObject(mem_dc, bitmap);
                     if needs_bitblt {
-                        BitBlt(mem_dc, 0, 0, virt_width, virt_height, screen_dc, virt_x, virt_y, SRCCOPY).ok();
+                        BitBlt(mem_dc, 0, 0, virt_width, virt_height, screen_dc, virt_x, virt_y, windows::Win32::Graphics::Gdi::ROP_CODE(SRCCOPY.0 | CAPTUREBLT.0)).ok();
                     }
 
                     // build a dim copy once, used per-frame during drag to
                     // paint the "outside selection" area without AlphaBlend.
                     let dim_dc = CreateCompatibleDC(screen_dc);
-                    let dim_bmp = CreateCompatibleBitmap(screen_dc, virt_width, virt_height);
+                    let dim_bmp = create_32bpp_dib(virt_width, virt_height).unwrap_or_default();
                     if !dim_dc.is_invalid() && !dim_bmp.is_invalid() {
                         let old_dim = SelectObject(dim_dc, dim_bmp);
                         // start with a copy of the screen (mem_dc currently has bitmap selected)
@@ -330,11 +356,11 @@ mod windows_impl {
                         // amortised across the lifetime of the selector instead
                         // of paying it on every WM_PAINT.
                         let dim_brush_dc = CreateCompatibleDC(screen_dc);
-                        let dim_brush_bmp = CreateCompatibleBitmap(screen_dc, virt_width, virt_height);
+                        let dim_brush_bmp = create_32bpp_dib(1, 1).unwrap_or_default();
                         if !dim_brush_dc.is_invalid() && !dim_brush_bmp.is_invalid() {
                             let old_db = SelectObject(dim_brush_dc, dim_brush_bmp);
                             let black = CreateSolidBrush(windows::Win32::Foundation::COLORREF(0x00000000));
-                            let full = RECT { left: 0, top: 0, right: virt_width, bottom: virt_height };
+                            let full = RECT { left: 0, top: 0, right: 1, bottom: 1 };
                             FillRect(dim_brush_dc, &full, black);
                             let _ = DeleteObject(black);
                             let blend = BLENDFUNCTION {
@@ -345,7 +371,7 @@ mod windows_impl {
                             };
                             let _ = AlphaBlend(
                                 dim_dc, 0, 0, virt_width, virt_height,
-                                dim_brush_dc, 0, 0, virt_width, virt_height,
+                                dim_brush_dc, 0, 0, 1, 1,
                                 blend,
                             );
                             SelectObject(dim_brush_dc, old_db);
@@ -543,7 +569,7 @@ mod windows_impl {
                     let mut bmp_guard = BACK_BITMAP.lock().unwrap();
                     if dc_guard.is_none() {
                         let dc = CreateCompatibleDC(hdc);
-                        let bmp = CreateCompatibleBitmap(hdc, width, height);
+                        let bmp = create_32bpp_dib(width, height).unwrap_or_default();
                         SelectObject(dc, bmp);
                         *dc_guard = Some(dc.0 as isize);
                         *bmp_guard = Some(bmp.0 as isize);
