@@ -25,6 +25,13 @@ export function Marketplace() {
       throw e;
     }
   });
+  const [loadErrors, { refetch: refetchErrors }] = createResource<string[]>(async () => {
+    try {
+      return await api.pluginLoadErrors();
+    } catch {
+      return [];
+    }
+  });
   const [status, setStatus] = createSignal<{ tone: string; msg: string } | null>(
     null,
   );
@@ -33,7 +40,7 @@ export function Marketplace() {
   const reload = async () => {
     setStatus({ tone: "", msg: "re-scanning..." });
     try {
-      await Promise.all([refetchInstalled(), refetchRegistry()]);
+      await Promise.all([refetchInstalled(), refetchRegistry(), refetchErrors()]);
       setStatus({ tone: "ok", msg: "done." });
     } catch (e) {
       setStatus({ tone: "err", msg: `err: ${e}` });
@@ -126,6 +133,22 @@ export function Marketplace() {
             </span>
           </Show>
         </div>
+
+        <Show when={(loadErrors() ?? []).length > 0}>
+          <div
+            class="flash"
+            data-tone="err"
+            style="display: block; margin: 0 0 14px; white-space: normal;"
+          >
+            <strong>{(loadErrors() ?? []).length} plugin(s) failed to load</strong>
+            <ul style="margin: 6px 0 0; padding-left: 18px;">
+              <For each={loadErrors()!}>{(err) => <li>{err}</li>}</For>
+            </ul>
+            <div class="muted" style="margin-top: 6px;">
+              load runs at launch — restart capscr after fixing a plugin.
+            </div>
+          </div>
+        </Show>
 
         <Show
           when={(plugins() ?? []).length > 0}

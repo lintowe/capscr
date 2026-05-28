@@ -1919,6 +1919,14 @@ pub fn list_installed_plugins() -> Result<Vec<InstalledPlugin>, String> {
     Ok(out)
 }
 
+// plugin load failures captured at startup, surfaced to the plugins tab. the
+// runtime loads plugins once at launch, so this reflects that pass — a restart
+// re-evaluates after the user fixes a plugin
+#[tauri::command]
+pub fn plugin_load_errors(state: State<AppState>) -> Vec<String> {
+    state.plugin_load_errors.lock().unwrap().clone()
+}
+
 #[tauri::command]
 pub fn open_plugins_folder(app: AppHandle) -> Result<(), String> {
     let dir = plugins_dir()?;

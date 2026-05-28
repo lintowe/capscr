@@ -4,6 +4,13 @@ format follows [keep-a-changelog](https://keepachangelog.com/en/1.1.0/) loosely.
 
 ## [unreleased]
 
+nothing pending. drop ideas in github issues.
+
+## [0.4.1] — 2026-05-28
+
+### added
+- the plugins tab now surfaces plugin **load failures**: a panel lists any plugin that failed to load at launch (bad `plugin.toml`, missing `plugin.wasm`, drive-absolute `runtime.file`, etc.) instead of the failure being a silent no-op. backed by a new `plugin_load_errors` command; the list reflects the startup load pass, so restart after fixing a plugin
+
 ### changed
 - removed dead Direct2D capture code left after the 0.4.0 per-display HDR refactor: the unreachable `use_d2d` branch in multi-monitor capture and the now-orphaned `d2d_window_capture` helper. no behaviour change — both were already unreachable (`d2d_capture_at_point` itself stays, still used by the active-monitor path)
 
