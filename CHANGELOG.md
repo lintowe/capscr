@@ -4,7 +4,8 @@ format follows [keep-a-changelog](https://keepachangelog.com/en/1.1.0/) loosely.
 
 ## [unreleased]
 
-nothing pending. drop ideas in github issues.
+### changed
+- removed dead Direct2D capture code left after the 0.4.0 per-display HDR refactor: the unreachable `use_d2d` branch in multi-monitor capture and the now-orphaned `d2d_window_capture` helper. no behaviour change — both were already unreachable (`d2d_capture_at_point` itself stays, still used by the active-monitor path)
 
 ## [0.4.0] — 2026-05-28
 
