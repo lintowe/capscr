@@ -218,6 +218,7 @@ export const api = {
   exitApp: () => invoke<void>("exit_app"),
 
   listInstalledPlugins: () => invoke<InstalledPlugin[]>("list_installed_plugins"),
+  pluginLoadErrors: () => invoke<string[]>("plugin_load_errors"),
   openPluginsFolder: () => invoke<void>("open_plugins_folder"),
   setAutostart: (enabled: boolean) => invoke<void>("set_autostart", { enabled }),
   getAutostart: () => invoke<boolean>("get_autostart"),

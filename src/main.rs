@@ -199,6 +199,7 @@ fn main() {
             commands::set_autostart,
             commands::get_autostart,
             commands::list_installed_plugins,
+            commands::plugin_load_errors,
             commands::open_plugins_folder,
             commands::marketplace_browse,
             commands::marketplace_install,

@@ -27,6 +27,10 @@ pub enum HotkeyStatus {
 pub struct AppState {
     pub config: Mutex<Config>,
     pub plugin_manager: Mutex<PluginManager>,
+    // human-readable plugin load failures captured at startup (load_all runs
+    // once in new()); surfaced to the plugins tab via the plugin_load_errors
+    // command so a broken plugin isn't a silent no-op
+    pub plugin_load_errors: Mutex<Vec<String>>,
     pub hotkey_tx: Mutex<Option<Sender<HotkeyCommand>>>,
     pub gif_recorder: Mutex<Option<GifRecorder>>,
     pub recording_state: Mutex<RecordingState>,
@@ -55,7 +59,8 @@ impl AppState {
     pub fn new(config: Config) -> Self {
         let mut plugin_manager = PluginManager::new();
         plugin_manager.set_lazy_loading(config.performance.lazy_init_plugins);
-        for err in plugin_manager.load_all() {
+        let load_errors = plugin_manager.load_all();
+        for err in &load_errors {
             tracing::warn!("Plugin load error: {}", err);
         }
 
@@ -63,6 +68,7 @@ impl AppState {
         Self {
             config: Mutex::new(config),
             plugin_manager: Mutex::new(plugin_manager),
+            plugin_load_errors: Mutex::new(load_errors),
             hotkey_tx: Mutex::new(None),
             gif_recorder: Mutex::new(None),
             recording_state: Mutex::new(RecordingState::Idle),
