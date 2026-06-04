@@ -32,6 +32,31 @@ use std::sync::OnceLock;
 
 static TONEMAP_OVERRIDE: OnceLock<TonemapParams> = OnceLock::new();
 
+// serialize concurrent HDR captures. HdrCapture (and the WGC path) reuse a
+// per-adapter D3D11 device + immediate context via DEVICE_CACHE, and concurrent
+// CopyResource/Map/Flush on one immediate context is undefined behaviour. when
+// all_monitors captures monitors in parallel this keeps the HDR captures
+// one-at-a-time — identical output, just serialised — while SDR/GDI captures,
+// which use independent device contexts, run fully concurrently. poison-tolerant
+// so a panicked capture can't wedge all future HDR captures.
+static HDR_CAPTURE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+thread_local! {
+    // set while a parallel monitor-capture worker runs so par_convert falls back
+    // to a serial pass instead of spawning a nested thread pool — the monitor
+    // loop already occupies every core, so nesting would only oversubscribe.
+    static SERIAL_CONVERT: std::cell::Cell<bool> = std::cell::Cell::new(false);
+}
+
+// run `f` with par_convert forced to its serial path on this thread. used by the
+// parallel all_monitors workers.
+pub(crate) fn capture_serial<R>(f: impl FnOnce() -> R) -> R {
+    SERIAL_CONVERT.with(|c| c.set(true));
+    let r = f();
+    SERIAL_CONVERT.with(|c| c.set(false));
+    r
+}
+
 pub fn install_tonemap_params(params: TonemapParams) {
     let _ = TONEMAP_OVERRIDE.set(params);
 }
@@ -294,9 +319,11 @@ where
     let src = &src[..n];
     let dst = &mut dst[..n];
 
-    // below ~1 MiB the spawn overhead outweighs the parallelism
+    // below ~1 MiB the spawn overhead outweighs the parallelism; and when the
+    // caller is already a parallel monitor-capture worker (SERIAL_CONVERT set),
+    // nesting another thread pool here would just oversubscribe the cores.
     const PAR_THRESHOLD: usize = 1 << 20;
-    if n < PAR_THRESHOLD {
+    if n < PAR_THRESHOLD || SERIAL_CONVERT.with(|c| c.get()) {
         for (d, s) in dst.chunks_exact_mut(4).zip(src.chunks_exact(4)) {
             d.copy_from_slice(&per_pixel(s));
         }
@@ -391,6 +418,10 @@ pub fn capture_one_monitor(monitor: &MonitorInfo) -> Result<RgbaImage> {
     };
 
     let raw: RgbaImage = if is_hdr {
+        // serialise the D3D-backed HDR capture so parallel all_monitors workers
+        // never share the cached immediate context concurrently. SDR captures
+        // below skip the lock and stay fully parallel.
+        let _hdr_guard = HDR_CAPTURE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         if wgc_enabled() {
             wgc_capture_at_point(center.0, center.1).or_else(|e| {
                 tracing::warn!("WGC capture failed at {center:?} — GDI fallback: {e:#}");
@@ -540,5 +571,23 @@ mod tests {
             d[3] = s[3];
         }
         assert_eq!(got, want, "parallel output must match the serial swap byte-for-byte");
+    }
+
+    #[test]
+    fn capture_serial_path_is_identical_to_parallel() {
+        // capture_serial only changes whether par_convert spawns threads, never
+        // the bytes it produces. a >1 MiB buffer exercises the parallel path.
+        let px = 400_000usize;
+        let mut src = vec![0u8; px * 4];
+        for (i, b) in src.iter_mut().enumerate() {
+            *b = (i % 251) as u8;
+        }
+        let mut parallel = vec![0u8; px * 4];
+        par_convert(&src, &mut parallel, |s| [s[2], s[1], s[0], 255]);
+
+        let mut serial = vec![0u8; px * 4];
+        capture_serial(|| par_convert(&src, &mut serial, |s| [s[2], s[1], s[0], 255]));
+
+        assert_eq!(parallel, serial, "capture_serial must not change the output bytes");
     }
 }
