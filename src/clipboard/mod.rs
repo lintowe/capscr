@@ -227,8 +227,11 @@ pub fn save_image<P: AsRef<Path>>(
             image.save(path)?;
         }
         crate::config::ImageFormat::Jpeg => {
+            use image::buffer::ConvertBuffer;
             let quality = quality.min(100);
-            let rgb_image = image::DynamicImage::ImageRgba8(image.clone()).to_rgb8();
+            // convert RGBA->RGB directly (JPEG has no alpha) instead of cloning
+            // into a DynamicImage first — one allocation instead of two.
+            let rgb_image: image::RgbImage = image.convert();
             let file = OpenOptions::new()
                 .write(true)
                 .create(true)

@@ -6,6 +6,11 @@ format follows [keep-a-changelog](https://keepachangelog.com/en/1.1.0/) loosely.
 
 nothing pending. drop ideas in github issues.
 
+## [0.5.16] — 2026-06-04
+
+### performance
+- removed more redundant full-frame image clones: copying a history capture or an edited image to the clipboard and uploading an edited image now move the decoded buffer (`into_rgba8`) instead of cloning it, and JPEG saves convert RGBA→RGB in a single pass instead of cloning into a `DynamicImage` first
+
 ## [0.5.15] — 2026-06-04
 
 ### performance
