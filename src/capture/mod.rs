@@ -42,10 +42,18 @@ thread_local! {
 // run `f` with par_convert forced to its serial path on this thread. used by the
 // parallel all_monitors workers.
 pub(crate) fn capture_serial<R>(f: impl FnOnce() -> R) -> R {
+    // RAII reset so the flag is cleared even if `f` panics — keeps the thread
+    // usable if it is ever reused (scoped workers are one-shot today, but this
+    // removes the footgun rather than relying on that).
+    struct Reset;
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            SERIAL_CONVERT.with(|c| c.set(false));
+        }
+    }
     SERIAL_CONVERT.with(|c| c.set(true));
-    let r = f();
-    SERIAL_CONVERT.with(|c| c.set(false));
-    r
+    let _reset = Reset;
+    f()
 }
 
 pub fn install_tonemap_params(params: TonemapParams) {

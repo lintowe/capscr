@@ -6,6 +6,11 @@ format follows [keep-a-changelog](https://keepachangelog.com/en/1.1.0/) loosely.
 
 nothing pending. drop ideas in github issues.
 
+## [0.5.14] — 2026-06-04
+
+### changed
+- hardened the parallel-capture serial-conversion flag to clear via RAII so it resets even if a capture worker panics (defensive — the capture workers are one-shot today, so this was a latent footgun rather than an active bug)
+
 ## [0.5.13] — 2026-06-04
 
 ### fixed
