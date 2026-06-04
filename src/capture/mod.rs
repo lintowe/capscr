@@ -100,6 +100,25 @@ pub fn wgc_enabled() -> bool {
     })
 }
 
+// opt-in: skip the fixed ~10ms settle sleep before the first DXGI
+// AcquireNextFrame in the CPU-HDR capture path. the first frame after
+// DuplicateOutput is the current desktop, and the acquire loop + black-frame
+// retry already recover a stale/black first frame, so the sleep is usually pure
+// latency. left off by default because some drivers may rely on the settle
+// time; CAPSCR_FAST_HDR=1 trims it once verified on real HDR hardware.
+pub fn fast_hdr_acquire_enabled() -> bool {
+    static GATE: OnceLock<bool> = OnceLock::new();
+    *GATE.get_or_init(|| {
+        let raw = std::env::var("CAPSCR_FAST_HDR").unwrap_or_else(|_| "<unset>".to_string());
+        let forced_on = matches!(raw.trim(), "1" | "true" | "TRUE" | "on");
+        tracing::info!(
+            "CAPSCR_FAST_HDR env var = {:?} -> fast_hdr_acquire_enabled = {}",
+            raw, forced_on,
+        );
+        forced_on
+    })
+}
+
 use anyhow::Result;
 use image::RgbaImage;
 

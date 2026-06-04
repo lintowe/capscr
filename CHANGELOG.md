@@ -6,6 +6,11 @@ format follows [keep-a-changelog](https://keepachangelog.com/en/1.1.0/) loosely.
 
 nothing pending. drop ideas in github issues.
 
+## [0.5.20] — 2026-06-04
+
+### added
+- `CAPSCR_FAST_HDR=1` opt-in that skips the fixed ~10ms settle sleep before the first DXGI frame acquire on the CPU-HDR capture path, trimming that latency from HDR captures. off by default — some drivers may rely on the settle time — but the acquire loop and black-frame retry already recover a stale first frame, so it is safe to enable and verify on real HDR hardware
+
 ## [0.5.19] — 2026-06-04
 
 ### changed
