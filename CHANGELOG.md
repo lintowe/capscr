@@ -6,6 +6,11 @@ format follows [keep-a-changelog](https://keepachangelog.com/en/1.1.0/) loosely.
 
 nothing pending. drop ideas in github issues.
 
+## [0.5.12] — 2026-06-04
+
+### performance
+- multi-monitor freeze-frame capture (the snapshot behind region/window/fullscreen capture mode) now grabs the displays concurrently instead of one after another, overlapping the per-display GPU readbacks and spreading the work across cores. SDR displays capture in parallel; HDR displays are captured one-at-a-time under a lock so their shared GPU device is never used concurrently, keeping HDR output byte-identical. single-monitor setups are unchanged, and per-display pixel conversions run serially inside each worker to avoid oversubscribing cores
+
 ## [0.5.11] — 2026-06-04
 
 ### performance
