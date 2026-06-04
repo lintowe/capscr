@@ -354,6 +354,15 @@ mod windows_hdr {
 
     static DEVICE_CACHE: OnceLock<Mutex<HashMap<AdapterLuid, (ID3D11Device, ID3D11DeviceContext)>>> = OnceLock::new();
 
+    // serialize CPU-HDR captures: the per-adapter device + immediate context in
+    // DEVICE_CACHE are shared, and concurrent CopyResource/Map/Flush on one
+    // immediate context is undefined behaviour. Guards only this DXGI-duplication
+    // path (so concurrent all_monitors workers run one HDR capture at a time);
+    // WGC (its own per-call device) and SDR/GDI stay fully parallel. Scoped here
+    // rather than in capture_one_monitor so it is never held across the SDR
+    // fallback's re-entry into capture_one_monitor. poison-tolerant.
+    static HDR_CAPTURE_LOCK: Mutex<()> = Mutex::new(());
+
     use windows::core::Interface;
     use windows::Win32::Graphics::Dxgi::{
         CreateDXGIFactory1, IDXGIAdapter1, IDXGIFactory1, IDXGIOutput, IDXGIOutput6,
@@ -564,6 +573,9 @@ mod windows_hdr {
     pub fn capture_hdr_screen(
         target: Option<(i32, i32)>,
     ) -> Result<(Vec<u8>, u32, u32, HdrFormat)> {
+        // serialize the shared-device readback (see HDR_CAPTURE_LOCK) so parallel
+        // all_monitors workers never use the cached immediate context at once.
+        let _hdr_guard = HDR_CAPTURE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         tracing::debug!("capture_hdr_screen: entering with target={target:?}");
         use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_UNKNOWN;
         use windows::Win32::Graphics::Direct3D11::{

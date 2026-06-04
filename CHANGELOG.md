@@ -6,6 +6,11 @@ format follows [keep-a-changelog](https://keepachangelog.com/en/1.1.0/) loosely.
 
 nothing pending. drop ideas in github issues.
 
+## [0.5.13] — 2026-06-04
+
+### fixed
+- fixed a potential deadlock introduced with the 0.5.12 parallel capture: the HDR-capture serialization lock was held across `capture_one_monitor`, which can re-enter itself through the SDR fallback when the point-based and adapter-based HDR-detection queries momentarily disagree, taking the non-reentrant lock twice on one thread. the lock now guards only the shared-device DXGI readback, so it is never held across that re-entry — and as a bonus no longer serializes the WGC path, which uses its own per-call device
+
 ## [0.5.12] — 2026-06-04
 
 ### performance

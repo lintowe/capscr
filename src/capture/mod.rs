@@ -32,15 +32,6 @@ use std::sync::OnceLock;
 
 static TONEMAP_OVERRIDE: OnceLock<TonemapParams> = OnceLock::new();
 
-// serialize concurrent HDR captures. HdrCapture (and the WGC path) reuse a
-// per-adapter D3D11 device + immediate context via DEVICE_CACHE, and concurrent
-// CopyResource/Map/Flush on one immediate context is undefined behaviour. when
-// all_monitors captures monitors in parallel this keeps the HDR captures
-// one-at-a-time — identical output, just serialised — while SDR/GDI captures,
-// which use independent device contexts, run fully concurrently. poison-tolerant
-// so a panicked capture can't wedge all future HDR captures.
-static HDR_CAPTURE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
 thread_local! {
     // set while a parallel monitor-capture worker runs so par_convert falls back
     // to a serial pass instead of spawning a nested thread pool — the monitor
@@ -418,10 +409,6 @@ pub fn capture_one_monitor(monitor: &MonitorInfo) -> Result<RgbaImage> {
     };
 
     let raw: RgbaImage = if is_hdr {
-        // serialise the D3D-backed HDR capture so parallel all_monitors workers
-        // never share the cached immediate context concurrently. SDR captures
-        // below skip the lock and stay fully parallel.
-        let _hdr_guard = HDR_CAPTURE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         if wgc_enabled() {
             wgc_capture_at_point(center.0, center.1).or_else(|e| {
                 tracing::warn!("WGC capture failed at {center:?} — GDI fallback: {e:#}");
