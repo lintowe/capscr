@@ -679,9 +679,14 @@ mod windows_hdr {
             };
             tracing::debug!("duplicate_with_formats took {}ms", t_dup.elapsed().as_millis());
 
-            let t_sleep = std::time::Instant::now();
-            std::thread::sleep(std::time::Duration::from_millis(10));
-            tracing::debug!("Initial sleep took {}ms", t_sleep.elapsed().as_millis());
+            // fixed settle sleep before the first acquire. off the critical path
+            // when CAPSCR_FAST_HDR=1 (see fast_hdr_acquire_enabled); default
+            // keeps the safe 10ms since some drivers rely on the settle time.
+            if !crate::capture::fast_hdr_acquire_enabled() {
+                let t_sleep = std::time::Instant::now();
+                std::thread::sleep(std::time::Duration::from_millis(10));
+                tracing::debug!("Initial sleep took {}ms", t_sleep.elapsed().as_millis());
+            }
 
             let t_acq = std::time::Instant::now();
             let mut frame_info = DXGI_OUTDUPL_FRAME_INFO::default();
