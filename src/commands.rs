@@ -1050,7 +1050,7 @@ pub fn copy_capture_to_clipboard(path: String, state: State<AppState>) -> Result
         return Err("Path is outside the allowed directories".into());
     }
     let img = image::open(&canonical).map_err(|e| e.to_string())?;
-    let rgba = img.to_rgba8();
+    let rgba = img.into_rgba8();
     let mut cb = ClipboardManager::new().map_err(|e| e.to_string())?;
     cb.copy_image(&rgba).map_err(|e| e.to_string())
 }
@@ -1378,7 +1378,7 @@ pub fn save_edited_image(
 #[tauri::command]
 pub fn copy_edited_image_to_clipboard(bytes: Vec<u8>) -> Result<(), String> {
     let img = image::load_from_memory(&bytes).map_err(|e| e.to_string())?;
-    let rgba = img.to_rgba8();
+    let rgba = img.into_rgba8();
     let mut cb = ClipboardManager::new().map_err(|e| e.to_string())?;
     cb.copy_image(&rgba).map_err(|e| e.to_string())
 }
@@ -1452,7 +1452,7 @@ pub fn upload_edited_image(
     state: State<AppState>,
 ) -> Result<UploadResponse, String> {
     let img = image::load_from_memory(&bytes).map_err(|e| e.to_string())?;
-    let rgba = img.to_rgba8();
+    let rgba = img.into_rgba8();
     let config = state.config.lock().unwrap().clone();
     let uploader = crate::upload::shared_uploader().map_err(|e| e.to_string())?;
     let service = build_upload_service(&config);
