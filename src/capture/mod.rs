@@ -278,6 +278,48 @@ pub fn list_monitors() -> Result<Vec<MonitorInfo>> {
     Ok(monitors)
 }
 
+// run a 4-byte-per-pixel conversion from src into dst, splitting the work
+// across cores for large frames. each output pixel is per_pixel(input_pixel).
+// used for the full-virtual-screen BGRA<->RGBA swaps on the capture-open path,
+// which are otherwise single-threaded scalar passes over tens of millions of
+// pixels. small buffers run inline to avoid thread-spawn overhead. the result
+// is byte-identical to the equivalent serial loop — this only changes how the
+// bytes are computed, never which bytes, so it is safe on the (already
+// tonemapped) freeze frame.
+pub(crate) fn par_convert<F>(src: &[u8], dst: &mut [u8], per_pixel: F)
+where
+    F: Fn(&[u8]) -> [u8; 4] + Sync,
+{
+    let n = src.len().min(dst.len()) & !3; // whole pixels only
+    let src = &src[..n];
+    let dst = &mut dst[..n];
+
+    // below ~1 MiB the spawn overhead outweighs the parallelism
+    const PAR_THRESHOLD: usize = 1 << 20;
+    if n < PAR_THRESHOLD {
+        for (d, s) in dst.chunks_exact_mut(4).zip(src.chunks_exact(4)) {
+            d.copy_from_slice(&per_pixel(s));
+        }
+        return;
+    }
+
+    let threads = std::thread::available_parallelism()
+        .map(|t| t.get().min(16))
+        .unwrap_or(4)
+        .max(1);
+    let chunk_bytes = (n / 4).div_ceil(threads) * 4;
+    let per_pixel = &per_pixel;
+    std::thread::scope(|scope| {
+        for (d_chunk, s_chunk) in dst.chunks_mut(chunk_bytes).zip(src.chunks(chunk_bytes)) {
+            scope.spawn(move || {
+                for (d, s) in d_chunk.chunks_exact_mut(4).zip(s_chunk.chunks_exact(4)) {
+                    d.copy_from_slice(&per_pixel(s));
+                }
+            });
+        }
+    });
+}
+
 // if the entire frame is alpha=0, force it fully opaque. GDI BitBlt and
 // some HDR duplication formats leave the alpha channel zeroed even over
 // real color, which would otherwise persist as a fully transparent PNG.
@@ -467,5 +509,36 @@ mod tests {
     fn black_frame_true_on_all_zero() {
         let img = RgbaImage::from_pixel(8, 8, image::Rgba([0, 0, 0, 0]));
         assert!(is_black_frame(&img));
+    }
+
+    #[test]
+    fn par_convert_small_buffer_is_exact() {
+        // below the parallel threshold -> serial path. BGRA->RGBA, opaque alpha.
+        let src = [1u8, 2, 3, 4, 5, 6, 7, 8];
+        let mut got = [0u8; 8];
+        par_convert(&src, &mut got, |s| [s[2], s[1], s[0], 255]);
+        assert_eq!(got, [3, 2, 1, 255, 7, 6, 5, 255]);
+    }
+
+    #[test]
+    fn par_convert_matches_serial_across_chunk_boundaries() {
+        // larger than PAR_THRESHOLD (1 MiB) so the multi-threaded path runs;
+        // a non-uniform pattern catches any chunk-boundary or off-by-one bug.
+        let px = 400_000usize; // 1.6 MB
+        let mut src = vec![0u8; px * 4];
+        for (i, b) in src.iter_mut().enumerate() {
+            *b = (i % 251) as u8;
+        }
+        let mut got = vec![0u8; px * 4];
+        par_convert(&src, &mut got, |s| [s[2], s[1], s[0], s[3]]);
+
+        let mut want = vec![0u8; px * 4];
+        for (d, s) in want.chunks_exact_mut(4).zip(src.chunks_exact(4)) {
+            d[0] = s[2];
+            d[1] = s[1];
+            d[2] = s[0];
+            d[3] = s[3];
+        }
+        assert_eq!(got, want, "parallel output must match the serial swap byte-for-byte");
     }
 }

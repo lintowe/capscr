@@ -274,19 +274,10 @@ mod windows_impl {
         // output.
         let pixels = img.as_raw();
         unsafe {
-            let p = bits_ptr as *mut u8;
             let len = (width as usize) * (height as usize) * 4;
-            let dest_slice = std::slice::from_raw_parts_mut(p, len);
-            let n = dest_slice.len().min(pixels.len());
-            for (dst, src) in dest_slice[..n]
-                .chunks_exact_mut(4)
-                .zip(pixels[..n].chunks_exact(4))
-            {
-                dst[0] = src[2]; // B
-                dst[1] = src[1]; // G
-                dst[2] = src[0]; // R
-                dst[3] = src[3]; // A
-            }
+            let dest_slice = std::slice::from_raw_parts_mut(bits_ptr as *mut u8, len);
+            // RGBA -> BGRA for the GDI DIB (parallel over the full virtual screen)
+            crate::capture::par_convert(pixels, dest_slice, |s| [s[2], s[1], s[0], s[3]]);
         }
 
         Some(hbmp)
@@ -326,19 +317,14 @@ mod windows_impl {
 
         let pixels = img.as_raw();
         unsafe {
-            let p = bits_ptr as *mut u8;
             let len = (width as usize) * (height as usize) * 4;
-            let dest_slice = std::slice::from_raw_parts_mut(p, len);
-            let n = dest_slice.len().min(pixels.len());
-            for (dst, src) in dest_slice[..n]
-                .chunks_exact_mut(4)
-                .zip(pixels[..n].chunks_exact(4))
-            {
-                dst[0] = ((src[2] as u32 * dim_num) / 255) as u8; // B
-                dst[1] = ((src[1] as u32 * dim_num) / 255) as u8; // G
-                dst[2] = ((src[0] as u32 * dim_num) / 255) as u8; // R
-                dst[3] = 255;
-            }
+            let dest_slice = std::slice::from_raw_parts_mut(bits_ptr as *mut u8, len);
+            // RGBA -> BGRA, multiplying each channel by dim_num/255 to bake the
+            // darken (parallel over the full virtual screen)
+            crate::capture::par_convert(pixels, dest_slice, move |s| {
+                let d = |v: u8| ((v as u32 * dim_num) / 255) as u8;
+                [d(s[2]), d(s[1]), d(s[0]), 255]
+            });
         }
 
         Some(hbmp)

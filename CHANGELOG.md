@@ -6,6 +6,11 @@ format follows [keep-a-changelog](https://keepachangelog.com/en/1.1.0/) loosely.
 
 nothing pending. drop ideas in github issues.
 
+## [0.5.11] — 2026-06-04
+
+### performance
+- the full-virtual-screen BGRA/RGBA conversions on the capture-open path (the freeze-frame swap plus the two selector overlay bitmaps) now run in parallel across cores through a shared helper instead of single-threaded scalar loops over tens of millions of pixels. output is byte-identical — guarded by a new chunk-boundary regression test — so SDR and HDR captures look exactly the same
+
 ## [0.5.10] — 2026-06-04
 
 ### fixed

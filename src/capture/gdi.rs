@@ -82,17 +82,11 @@ pub fn fast_gdi_capture(x: i32, y: i32, width: u32, height: u32) -> Result<RgbaI
         // read the blitted BGRA bits straight from the DIB section and write
         // RGBA in the same pass — one copy+swap instead of GetDIBits then swap.
         let src = std::slice::from_raw_parts(bits_ptr as *const u8, pixel_count * 4);
-        for (dst, s) in rgba_data.chunks_exact_mut(4).zip(src.chunks_exact(4)) {
-            dst[0] = s[2]; // R
-            dst[1] = s[1]; // G
-            dst[2] = s[0]; // B
-            // screen BitBlt leaves the alpha byte undefined (usually 0); force
-            // opaque here since a desktop capture is always opaque. this is what
-            // capture_one_monitor's ensure_opaque pass would do anyway, but
-            // setting it inline lets that pass early-return instead of scanning
-            // and rewriting the whole frame
-            dst[3] = 255;
-        }
+        // BGRA (DIB) -> RGBA, forcing opaque alpha. screen BitBlt leaves the
+        // alpha byte undefined (usually 0); a desktop capture is always opaque,
+        // and writing 255 here lets capture_one_monitor's ensure_opaque pass
+        // early-return instead of scanning and rewriting the whole frame.
+        super::par_convert(src, &mut rgba_data, |s| [s[2], s[1], s[0], 255]);
 
         SelectObject(mem_dc, old_bitmap);
         let _ = DeleteObject(bitmap);
