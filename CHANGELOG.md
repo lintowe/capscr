@@ -6,6 +6,11 @@ format follows [keep-a-changelog](https://keepachangelog.com/en/1.1.0/) loosely.
 
 nothing pending. drop ideas in github issues.
 
+## [0.5.25] — 2026-06-05
+
+### changed
+- transitioned windows installer from custom dark-skinned NSIS (.exe) to standard native WiX (.msi) to resolve layout, line rendering, and icon transparency bugs
+
 ## [0.5.24] — 2026-06-05
 
 ### fixed
