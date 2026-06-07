@@ -424,11 +424,13 @@ impl GifRecorder {
                     }
                 }
 
-                let mut frame = Frame::default();
-                frame.width = width;
-                frame.height = height;
-                frame.delay = delay;
-                frame.buffer = std::borrow::Cow::Owned(indexed_pixels);
+                let frame = Frame {
+                    width,
+                    height,
+                    delay,
+                    buffer: std::borrow::Cow::Owned(indexed_pixels),
+                    ..Default::default()
+                };
 
                 encoder.write_frame(&frame)?;
             }
