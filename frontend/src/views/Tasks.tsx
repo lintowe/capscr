@@ -241,14 +241,10 @@ export function Tasks() {
                               <input
                                 type="text"
                                 value={task.name}
-                                onInput={(e) =>
+                                onChange={(e) => {
                                   updateTask(i(), {
                                     name: e.currentTarget.value,
-                                  }, false)
-                                }
-                                onChange={() => {
-                                  const c = config();
-                                  if (c) saveConfig(c);
+                                  });
                                 }}
                               />
                             </div>

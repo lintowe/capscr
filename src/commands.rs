@@ -1303,14 +1303,19 @@ pub fn prewarm_hub_window(app: &tauri::App) -> tauri::Result<()> {
         return Ok(());
     }
     let url = tauri::WebviewUrl::App("index.html".into());
-    let window = tauri::WebviewWindowBuilder::new(app, HUB_LABEL, url)
+    let mut builder = tauri::WebviewWindowBuilder::new(app, HUB_LABEL, url)
         .title("capscr")
         .inner_size(900.0, 640.0)
         .min_inner_size(720.0, 480.0)
         .resizable(true)
         .decorations(false)
-        .visible(false)
-        .build()?;
+        .visible(false);
+
+    if let Some(icon) = app.default_window_icon().cloned() {
+        builder = builder.icon(icon)?;
+    }
+
+    let window = builder.build()?;
     // intercept the close button so the WebView2 process stays alive for the
     // next tray-click. Without this we pay multi-second cold-boot every time
     // the user closes and re-opens the hub, even after the startup prewarm.
@@ -1351,14 +1356,19 @@ pub fn open_hub_window(app: &AppHandle) -> tauri::Result<()> {
         return Ok(());
     }
     let url = tauri::WebviewUrl::App("index.html".into());
-    let window = tauri::WebviewWindowBuilder::new(app, HUB_LABEL, url)
+    let mut builder = tauri::WebviewWindowBuilder::new(app, HUB_LABEL, url)
         .title("capscr")
         .inner_size(900.0, 640.0)
         .min_inner_size(720.0, 480.0)
         .resizable(true)
         .decorations(false)
-        .visible(true)
-        .build()?;
+        .visible(true);
+
+    if let Some(icon) = app.default_window_icon().cloned() {
+        builder = builder.icon(icon)?;
+    }
+
+    let window = builder.build()?;
     intercept_hub_close(window);
     Ok(())
 }
@@ -1376,14 +1386,19 @@ pub fn open_editor_window(app: &AppHandle, image_path: &str) -> tauri::Result<()
         return Ok(());
     }
     let url = tauri::WebviewUrl::App("index.html".into());
-    tauri::WebviewWindowBuilder::new(app, EDITOR_LABEL, url)
+    let mut builder = tauri::WebviewWindowBuilder::new(app, EDITOR_LABEL, url)
         .title("capscr — edit")
         .inner_size(1200.0, 800.0)
         .min_inner_size(800.0, 600.0)
         .resizable(true)
         .decorations(false)
-        .visible(true)
-        .build()?;
+        .visible(true);
+
+    if let Some(icon) = app.default_window_icon().cloned() {
+        builder = builder.icon(icon)?;
+    }
+
+    let _window = builder.build()?;
     Ok(())
 }
 
