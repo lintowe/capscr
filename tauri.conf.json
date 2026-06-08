@@ -28,7 +28,9 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["msi"],
+    "targets": [
+      "msi"
+    ],
     "createUpdaterArtifacts": true,
     "icon": [
       "icons/icon.ico",
@@ -38,7 +40,11 @@
     "category": "Utility",
     "copyright": "© rot — capscr",
     "shortDescription": "Modern HDR-aware screen capture",
-    "longDescription": "capscr is a screen capture tool with HDR support, plugin marketplace, and per-hotkey task chains."
+    "longDescription": "capscr is a screen capture tool with HDR support, plugin marketplace, and per-hotkey task chains.",
+    "windows": {
+      "certificateThumbprint": "6EC3EDE3956F6F4B7423C723397AF66BC9D596BA",
+      "digestAlgorithm": "sha256"
+    }
   },
   "plugins": {
     "updater": {

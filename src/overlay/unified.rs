@@ -28,11 +28,11 @@ mod windows_impl {
                 SetTextColor, StretchBlt, TextOutW, AC_SRC_OVER, BLENDFUNCTION, HBITMAP, HDC,
                 HOLLOW_BRUSH, OPAQUE, PAINTSTRUCT, PS_SOLID, SRCCOPY, TRANSPARENT, CAPTUREBLT,
                 CreateDIBSection, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS,
-                Rectangle as GdiRectangle,
+                Rectangle as GdiRectangle, ScreenToClient,
             },
             System::LibraryLoader::GetModuleHandleW,
             UI::{
-                Input::KeyboardAndMouse::{VK_ESCAPE, VK_RETURN, VK_SPACE},
+                Input::KeyboardAndMouse::{VK_ESCAPE, VK_RETURN, VK_SPACE, VK_SHIFT, VK_CONTROL},
                 WindowsAndMessaging::{
                     CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, EnumWindows,
                     GetAncestor, GetCursorPos, GetMessageW, GetSystemMetrics, GetWindowLongW,
@@ -43,6 +43,7 @@ mod windows_impl {
                     WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_PAINT, WM_RBUTTONDOWN,
                     WNDCLASSW, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP, WS_VISIBLE,
                     SetLayeredWindowAttributes, LWA_ALPHA, LWA_COLORKEY,
+                    ChildWindowFromPointEx, CWP_SKIPINVISIBLE, CWP_SKIPTRANSPARENT,
                 },
             },
         },
@@ -78,6 +79,8 @@ mod windows_impl {
     static PICKED_G: AtomicU32 = AtomicU32::new(0);
     static PICKED_B: AtomicU32 = AtomicU32::new(0);
 
+    static SELECTOR_HWND: Mutex<Option<isize>> = Mutex::new(None);
+
     fn alt_held() -> bool {
         unsafe {
             let state = windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(
@@ -85,6 +88,96 @@ mod windows_impl {
             );
             state < 0
         }
+    }
+
+    fn ctrl_held() -> bool {
+        unsafe {
+            let state = windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(
+                VK_CONTROL.0 as i32,
+            );
+            state < 0
+        }
+    }
+
+    fn shift_held() -> bool {
+        unsafe {
+            let state = windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(
+                VK_SHIFT.0 as i32,
+            );
+            state < 0
+        }
+    }
+
+    fn find_child_hwnd_recursive(parent: HWND, screen_pt: POINT) -> HWND {
+        unsafe {
+            let mut client_pt = screen_pt;
+            if !ScreenToClient(parent, &mut client_pt).as_bool() {
+                return parent;
+            }
+            let child = ChildWindowFromPointEx(
+                parent,
+                client_pt,
+                CWP_SKIPINVISIBLE | CWP_SKIPTRANSPARENT,
+            );
+            if child.0.is_null() || child == parent {
+                parent
+            } else {
+                find_child_hwnd_recursive(child, screen_pt)
+            }
+        }
+    }
+
+    fn find_child_window_at_point(pt: POINT) -> Option<CachedWindow> {
+        let top_win = find_window_at_point(pt)?;
+        let child_hwnd = find_child_hwnd_recursive(HWND(top_win.hwnd as *mut _), pt);
+        if child_hwnd.0.is_null() || child_hwnd.0 == top_win.hwnd as *mut _ {
+            return Some(top_win);
+        }
+        let mut rect = RECT::default();
+        unsafe {
+            let dwm_ok = DwmGetWindowAttribute(
+                child_hwnd,
+                DWMWA_EXTENDED_FRAME_BOUNDS,
+                &mut rect as *mut RECT as *mut _,
+                std::mem::size_of::<RECT>() as u32,
+            )
+            .is_ok();
+            if dwm_ok || GetWindowRect(child_hwnd, &mut rect).is_ok() {
+                let width = rect.right - rect.left;
+                let height = rect.bottom - rect.top;
+                if width > 5 && height > 5 {
+                    return Some(CachedWindow {
+                        hwnd: child_hwnd.0 as isize,
+                        left: rect.left,
+                        top: rect.top,
+                        right: rect.right,
+                        bottom: rect.bottom,
+                    });
+                }
+            }
+        }
+        Some(top_win)
+    }
+
+    pub fn cancel_active_selection() {
+        if SELECTING.load(Ordering::SeqCst) {
+            CANCELLED.store(true, Ordering::SeqCst);
+            let hwnd_val = *SELECTOR_HWND.lock().unwrap();
+            if let Some(h) = hwnd_val {
+                unsafe {
+                    let _ = windows::Win32::UI::WindowsAndMessaging::PostMessageW(
+                        HWND(h as *mut _),
+                        windows::Win32::UI::WindowsAndMessaging::WM_CLOSE,
+                        WPARAM(0),
+                        LPARAM(0),
+                    );
+                }
+            }
+        }
+    }
+
+    pub fn active_selector_active() -> bool {
+        SELECTING.load(Ordering::SeqCst)
     }
 
     static SCREEN_BITMAP: Mutex<Option<isize>> = Mutex::new(None);
@@ -548,6 +641,7 @@ mod windows_impl {
                     return SelectionResult::Cancelled;
                 }
             };
+            *SELECTOR_HWND.lock().unwrap() = Some(hwnd.0 as isize);
 
             // layered-window attributes: black background paints at 70%
             // alpha (dim layer over live HDR desktop), magic green colorkey
@@ -586,6 +680,7 @@ mod windows_impl {
             }
 
             let _ = DestroyWindow(hwnd);
+            *SELECTOR_HWND.lock().unwrap() = None;
 
             if let Some(dc) = SCREEN_DC.lock().unwrap().take() {
                 let _ = DeleteDC(HDC(dc as *mut _));
@@ -619,7 +714,30 @@ mod windows_impl {
             let sx = START_X.load(Ordering::SeqCst);
             let sy = START_Y.load(Ordering::SeqCst);
             let ex = END_X.load(Ordering::SeqCst);
-            let ey = END_Y.load(Ordering::SeqCst);
+            let mut ey = END_Y.load(Ordering::SeqCst);
+
+            if shift_held() {
+                let dx = ex - sx;
+                let dy = ey - sy;
+                let w = dx.abs() as f64;
+                let h = dy.abs() as f64;
+                if w > 0.0 && h > 0.0 {
+                    let current_ratio = w / h;
+                    let targets = [1.0, 16.0 / 9.0, 16.0 / 10.0, 4.0 / 3.0, 21.0 / 9.0];
+                    let mut best_target = 1.0;
+                    let mut min_diff = f64::MAX;
+                    for &t in &targets {
+                        let diff = (current_ratio - t).abs();
+                        if diff < min_diff {
+                            min_diff = diff;
+                            best_target = t;
+                        }
+                    }
+                    let new_h = (w / best_target).round() as i32;
+                    let sign_y = if dy >= 0 { 1 } else { -1 };
+                    ey = sy + sign_y * new_h;
+                }
+            }
 
             let width = (ex - sx).abs();
             let height = (ey - sy).abs();
@@ -628,7 +746,14 @@ mod windows_impl {
                 return SelectionResult::Cancelled;
             }
 
-            SelectionResult::Region(Rectangle::normalize(sx, sy, ex, ey))
+            let mut rect = Rectangle::normalize(sx, sy, ex, ey);
+            if !rect.width.is_multiple_of(2) {
+                rect.width = rect.width.saturating_add(1);
+            }
+            if !rect.height.is_multiple_of(2) {
+                rect.height = rect.height.saturating_add(1);
+            }
+            SelectionResult::Region(rect)
         }
     }
 
@@ -699,7 +824,30 @@ mod windows_impl {
                 let sx = START_X.load(Ordering::SeqCst);
                 let sy = START_Y.load(Ordering::SeqCst);
                 let ex = END_X.load(Ordering::SeqCst);
-                let ey = END_Y.load(Ordering::SeqCst);
+                let mut ey = END_Y.load(Ordering::SeqCst);
+
+                if shift_held() {
+                    let dx = ex - sx;
+                    let dy = ey - sy;
+                    let w = dx.abs() as f64;
+                    let h = dy.abs() as f64;
+                    if w > 0.0 && h > 0.0 {
+                        let current_ratio = w / h;
+                        let targets = [1.0, 16.0 / 9.0, 16.0 / 10.0, 4.0 / 3.0, 21.0 / 9.0];
+                        let mut best_target = 1.0;
+                        let mut min_diff = f64::MAX;
+                        for &t in &targets {
+                            let diff = (current_ratio - t).abs();
+                            if diff < min_diff {
+                                min_diff = diff;
+                                best_target = t;
+                            }
+                        }
+                        let new_h = (w / best_target).round() as i32;
+                        let sign_y = if dy >= 0 { 1 } else { -1 };
+                        ey = sy + sign_y * new_h;
+                    }
+                }
 
                 let is_dragging = mouse_down && ((ex - sx).abs() > CLICK_THRESHOLD || (ey - sy).abs() > CLICK_THRESHOLD);
 
@@ -763,12 +911,21 @@ mod windows_impl {
                 } else if !mouse_down {
                     let hovered = HOVERED_WINDOW.load(Ordering::SeqCst);
                     if hovered != 0 {
-                        let windows = WINDOW_LIST.lock().unwrap();
-                        if let Some(cached) = windows.iter().find(|w| w.hwnd as u32 == hovered) {
-                            let left = cached.left - virt_x;
-                            let top = cached.top - virt_y;
-                            let right = cached.right - virt_x;
-                            let bottom = cached.bottom - virt_y;
+                        let hwnd = HWND(hovered as usize as *mut _);
+                        let mut rect = RECT::default();
+                        let dwm_ok = DwmGetWindowAttribute(
+                            hwnd,
+                            DWMWA_EXTENDED_FRAME_BOUNDS,
+                            &mut rect as *mut RECT as *mut _,
+                            std::mem::size_of::<RECT>() as u32,
+                        )
+                        .is_ok();
+                        let rect_ok = dwm_ok || GetWindowRect(hwnd, &mut rect).is_ok();
+                        if rect_ok {
+                            let left = rect.left - virt_x;
+                            let top = rect.top - virt_y;
+                            let right = rect.right - virt_x;
+                            let bottom = rect.bottom - virt_y;
 
                             if let Some(dc) = *SCREEN_DC.lock().unwrap() {
                                 if let Some(bmp) = *SCREEN_BITMAP.lock().unwrap() {
@@ -892,10 +1049,17 @@ mod windows_impl {
                 if mouse_down {
                     END_X.store(pt.x, Ordering::SeqCst);
                     END_Y.store(pt.y, Ordering::SeqCst);
-                } else if let Some(cached) = find_window_at_point(pt) {
-                    HOVERED_WINDOW.store(cached.hwnd as u32, Ordering::SeqCst);
                 } else {
-                    HOVERED_WINDOW.store(0, Ordering::SeqCst);
+                    let cached_opt = if ctrl_held() {
+                        find_child_window_at_point(pt)
+                    } else {
+                        find_window_at_point(pt)
+                    };
+                    if let Some(cached) = cached_opt {
+                        HOVERED_WINDOW.store(cached.hwnd as u32, Ordering::SeqCst);
+                    } else {
+                        HOVERED_WINDOW.store(0, Ordering::SeqCst);
+                    }
                 }
                 let _ = InvalidateRect(hwnd, None, false);
                 LRESULT(0)
@@ -953,7 +1117,12 @@ mod windows_impl {
                     let dy = (ey - sy).abs();
 
                     if dx <= CLICK_THRESHOLD && dy <= CLICK_THRESHOLD {
-                        if let Some(cached) = find_window_at_point(pt) {
+                        let cached_opt = if ctrl_held() {
+                            find_child_window_at_point(pt)
+                        } else {
+                            find_window_at_point(pt)
+                        };
+                        if let Some(cached) = cached_opt {
                             WINDOW_SELECTED.store(cached.hwnd as u32, Ordering::SeqCst);
                         }
                     }
@@ -1142,6 +1311,24 @@ impl UnifiedSelector {
     pub fn select(frozen_frame: Option<std::sync::Arc<image::RgbaImage>>) -> SelectionResult {
         fallback_impl::select(frozen_frame)
     }
+
+    #[cfg(windows)]
+    pub fn active_selector_active() -> bool {
+        windows_impl::active_selector_active()
+    }
+
+    #[cfg(not(windows))]
+    pub fn active_selector_active() -> bool {
+        false
+    }
+
+    #[cfg(windows)]
+    pub fn cancel_active_selection() {
+        windows_impl::cancel_active_selection();
+    }
+
+    #[cfg(not(windows))]
+    pub fn cancel_active_selection() {}
 
     /// kick off window enumeration on a background thread ahead of select() so
     /// it overlaps the freeze-frame capture. safe to call even if the resulting

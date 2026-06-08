@@ -248,6 +248,11 @@ fn run_capture_pipeline_inner(
     app: &AppHandle,
     upload_target: Option<crate::config::TaskUploadTarget>,
 ) -> anyhow::Result<()> {
+    // cancel selection if already active
+    if UnifiedSelector::active_selector_active() {
+        UnifiedSelector::cancel_active_selection();
+        return Ok(());
+    }
 
 
     use std::sync::atomic::Ordering;
@@ -1538,6 +1543,12 @@ pub fn run_task(task: &CaptureTask, app: &AppHandle) -> anyhow::Result<()> {
 }
 
 fn run_gif_task(task: &CaptureTask, app: &AppHandle) -> anyhow::Result<()> {
+    // cancel selection if already active
+    if UnifiedSelector::active_selector_active() {
+        UnifiedSelector::cancel_active_selection();
+        return Ok(());
+    }
+
     let state = app.state::<AppState>();
     let current = *state.recording_state.lock().unwrap();
     let active_id = state.recording_task_id.lock().unwrap().clone();
