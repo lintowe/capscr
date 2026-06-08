@@ -6,6 +6,21 @@ format follows [keep-a-changelog](https://keepachangelog.com/en/1.1.0/) loosely.
 
 nothing pending. drop ideas in github issues.
 
+## [0.5.27] — 2026-06-09
+
+### added
+- regional video recording (MP4) support: allows recording high-performance video clips directly from a selected region and outputting H.264 MP4 format files
+- screenshot and recording region selector overlay enhancements:
+  - active selection cancelling: pressing the screenshot/recording hotkey again while the selector overlay is active/open immediately cancels it
+  - aspect-ratio snap locking: holding shift snaps drag selection to standard aspect ratios (1:1, 16:9, 16:10, 4:3, 21:9)
+  - recursive child window and control detection: holding ctrl traverses down from top-level windows to detect individual buttons, text boxes, and inner panels
+  - forced even-pixel dimensions (width/height) on cropped regions to prevent H.264/FFmpeg encoding failures
+
+## [0.5.26] — 2026-06-08
+
+### fixed
+- resolved clippy warnings in regional gif encoder
+
 ## [0.5.25] — 2026-06-05
 
 ### changed
