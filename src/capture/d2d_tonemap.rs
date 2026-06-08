@@ -25,10 +25,12 @@
 use anyhow::{anyhow, Result};
 use image::RgbaImage;
 use windows::core::Interface;
+use windows::Win32::Graphics::Direct2D::Common::{
+    D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_COMPOSITE_MODE_SOURCE_OVER, D2D1_PIXEL_FORMAT,
+};
 use windows::Win32::Graphics::Direct2D::{
-    D2D1CreateFactory, ID2D1Bitmap1, ID2D1DeviceContext, ID2D1Effect, ID2D1Factory1,
-    CLSID_D2D1HdrToneMap, CLSID_D2D1Saturation, CLSID_D2D1WhiteLevelAdjustment,
-    D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
+    CLSID_D2D1HdrToneMap, CLSID_D2D1Saturation, CLSID_D2D1WhiteLevelAdjustment, D2D1CreateFactory,
+    ID2D1Bitmap1, ID2D1DeviceContext, ID2D1Effect, ID2D1Factory1, D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
     D2D1_BITMAP_OPTIONS_TARGET, D2D1_BITMAP_PROPERTIES1, D2D1_DEVICE_CONTEXT_OPTIONS_NONE,
     D2D1_FACTORY_TYPE_SINGLE_THREADED, D2D1_HDRTONEMAP_DISPLAY_MODE_SDR,
     D2D1_HDRTONEMAP_PROP_DISPLAY_MODE, D2D1_HDRTONEMAP_PROP_INPUT_MAX_LUMINANCE,
@@ -37,24 +39,21 @@ use windows::Win32::Graphics::Direct2D::{
     D2D1_WHITELEVELADJUSTMENT_PROP_INPUT_WHITE_LEVEL,
     D2D1_WHITELEVELADJUSTMENT_PROP_OUTPUT_WHITE_LEVEL,
 };
-use windows::Win32::Graphics::Direct2D::Common::{
-    D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_COMPOSITE_MODE_SOURCE_OVER, D2D1_PIXEL_FORMAT,
-};
 use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_UNKNOWN;
 use windows::Win32::Graphics::Direct3D11::{
-    D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D, D3D11_BIND_RENDER_TARGET,
-    D3D11_CPU_ACCESS_READ, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_MAP_READ,
-    D3D11_MAPPED_SUBRESOURCE, D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT,
-    D3D11_USAGE_STAGING,
-};
-use windows::Win32::Graphics::Dxgi::{
-    CreateDXGIFactory1, IDXGIAdapter1, IDXGIDevice, IDXGIFactory1, IDXGIOutput, IDXGIOutput1,
-    IDXGIOutput5, IDXGIOutputDuplication, IDXGIResource, IDXGISurface,
-    DXGI_ERROR_ACCESS_LOST, DXGI_ERROR_WAIT_TIMEOUT, DXGI_OUTDUPL_FRAME_INFO,
+    D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D,
+    D3D11_BIND_RENDER_TARGET, D3D11_CPU_ACCESS_READ, D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+    D3D11_MAPPED_SUBRESOURCE, D3D11_MAP_READ, D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC,
+    D3D11_USAGE_DEFAULT, D3D11_USAGE_STAGING,
 };
 use windows::Win32::Graphics::Dxgi::Common::{
     DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_B8G8R8A8_UNORM_SRGB, DXGI_FORMAT_R10G10B10A2_UNORM,
     DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_SAMPLE_DESC,
+};
+use windows::Win32::Graphics::Dxgi::{
+    CreateDXGIFactory1, IDXGIAdapter1, IDXGIDevice, IDXGIFactory1, IDXGIOutput, IDXGIOutput1,
+    IDXGIOutput5, IDXGIOutputDuplication, IDXGIResource, IDXGISurface, DXGI_ERROR_ACCESS_LOST,
+    DXGI_ERROR_WAIT_TIMEOUT, DXGI_OUTDUPL_FRAME_INFO,
 };
 
 // tunable tonemap knobs. the shipping default is DEFAULT; the sweep
@@ -87,7 +86,10 @@ pub fn capture_hdr_to_sdr(target: Option<(i32, i32)>) -> Result<RgbaImage> {
     capture_hdr_to_sdr_variant(target, TmVariant::DEFAULT)
 }
 
-pub fn capture_hdr_to_sdr_variant(target: Option<(i32, i32)>, variant: TmVariant) -> Result<RgbaImage> {
+pub fn capture_hdr_to_sdr_variant(
+    target: Option<(i32, i32)>,
+    variant: TmVariant,
+) -> Result<RgbaImage> {
     let t0 = std::time::Instant::now();
     unsafe {
         // 1. pick adapter+output for the target monitor (multi-GPU safe)
@@ -151,7 +153,8 @@ pub fn capture_hdr_to_sdr_variant(target: Option<(i32, i32)>, variant: TmVariant
                     let mut is_black = false;
                     // check if the frame is completely black (all-zeros)
                     // only check if lastpresenttime == 0 and accumulatedframes == 0
-                    let check_black = frame_info.LastPresentTime == 0 && frame_info.AccumulatedFrames == 0;
+                    let check_black =
+                        frame_info.LastPresentTime == 0 && frame_info.AccumulatedFrames == 0;
                     if check_black {
                         if let Ok(desktop_texture) = desktop_res.cast::<ID3D11Texture2D>() {
                             let mut tex_desc = D3D11_TEXTURE2D_DESC::default();
@@ -172,11 +175,21 @@ pub fn capture_hdr_to_sdr_variant(target: Option<(i32, i32)>, variant: TmVariant
                                     MiscFlags: Default::default(),
                                 };
                                 let mut staging_texture: Option<ID3D11Texture2D> = None;
-                                if device.CreateTexture2D(&staging_desc, None, Some(&mut staging_texture)).is_ok() {
+                                if device
+                                    .CreateTexture2D(
+                                        &staging_desc,
+                                        None,
+                                        Some(&mut staging_texture),
+                                    )
+                                    .is_ok()
+                                {
                                     if let Some(staging) = staging_texture {
                                         context.CopyResource(&staging, &desktop_texture);
                                         let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
-                                        if context.Map(&staging, 0, D3D11_MAP_READ, 0, Some(&mut mapped)).is_ok() {
+                                        if context
+                                            .Map(&staging, 0, D3D11_MAP_READ, 0, Some(&mut mapped))
+                                            .is_ok()
+                                        {
                                             let src_ptr = mapped.pData as *const u8;
                                             if !src_ptr.is_null() {
                                                 let bytes_per_pixel = match tex_desc.Format {
@@ -187,16 +200,28 @@ pub fn capture_hdr_to_sdr_variant(target: Option<(i32, i32)>, variant: TmVariant
                                                 let row_bytes = w as usize * bytes_per_pixel;
                                                 let row_pitch = mapped.RowPitch as usize;
                                                 if row_pitch >= row_bytes {
-                                                    let first_row = std::slice::from_raw_parts(src_ptr, row_bytes);
-                                                    is_black = first_row.iter().all(|&b| b == 0) && {
-                                                        let mid_row = src_ptr.add(row_pitch * (h as usize / 2));
-                                                        let mid_slice = std::slice::from_raw_parts(mid_row, row_bytes);
-                                                        mid_slice.iter().all(|&b| b == 0)
-                                                    } && {
-                                                        let last_row = src_ptr.add(row_pitch * (h as usize - 1));
-                                                        let last_slice = std::slice::from_raw_parts(last_row, row_bytes);
-                                                        last_slice.iter().all(|&b| b == 0)
-                                                    };
+                                                    let first_row = std::slice::from_raw_parts(
+                                                        src_ptr, row_bytes,
+                                                    );
+                                                    is_black = first_row.iter().all(|&b| b == 0)
+                                                        && {
+                                                            let mid_row = src_ptr
+                                                                .add(row_pitch * (h as usize / 2));
+                                                            let mid_slice =
+                                                                std::slice::from_raw_parts(
+                                                                    mid_row, row_bytes,
+                                                                );
+                                                            mid_slice.iter().all(|&b| b == 0)
+                                                        }
+                                                        && {
+                                                            let last_row = src_ptr
+                                                                .add(row_pitch * (h as usize - 1));
+                                                            let last_slice =
+                                                                std::slice::from_raw_parts(
+                                                                    last_row, row_bytes,
+                                                                );
+                                                            last_slice.iter().all(|&b| b == 0)
+                                                        };
                                                 }
                                             }
                                             context.Unmap(&staging, 0);
@@ -383,7 +408,10 @@ pub fn capture_hdr_to_sdr_variant(target: Option<(i32, i32)>, variant: TmVariant
             MipLevels: 1,
             ArraySize: 1,
             Format: out_format,
-            SampleDesc: DXGI_SAMPLE_DESC { Count: 1, Quality: 0 },
+            SampleDesc: DXGI_SAMPLE_DESC {
+                Count: 1,
+                Quality: 0,
+            },
             Usage: D3D11_USAGE_DEFAULT,
             BindFlags: D3D11_BIND_RENDER_TARGET.0 as u32,
             CPUAccessFlags: 0,
@@ -429,7 +457,10 @@ pub fn capture_hdr_to_sdr_variant(target: Option<(i32, i32)>, variant: TmVariant
             MipLevels: 1,
             ArraySize: 1,
             Format: out_format,
-            SampleDesc: DXGI_SAMPLE_DESC { Count: 1, Quality: 0 },
+            SampleDesc: DXGI_SAMPLE_DESC {
+                Count: 1,
+                Quality: 0,
+            },
             Usage: D3D11_USAGE_STAGING,
             BindFlags: 0,
             CPUAccessFlags: D3D11_CPU_ACCESS_READ.0 as u32,
@@ -451,7 +482,10 @@ pub fn capture_hdr_to_sdr_variant(target: Option<(i32, i32)>, variant: TmVariant
                 unsafe { self.ctx.Unmap(self.tex, 0) };
             }
         }
-        let _unmap = UnmapGuard { ctx: &context, tex: &staging };
+        let _unmap = UnmapGuard {
+            ctx: &context,
+            tex: &staging,
+        };
 
         let row_pitch = mapped.RowPitch as usize;
         let row_bytes = (width as usize) * 4;
@@ -506,13 +540,59 @@ pub fn capture_hdr_to_sdr_sweep(target: Option<(i32, i32)>, outdir: &str) -> Res
     let d = TmVariant::DEFAULT;
     let variants: &[(&str, TmVariant)] = &[
         ("00_baseline", d),
-        ("01_srgb", TmVariant { out_srgb: true, ..d }),
-        ("02_outmax200", TmVariant { output_max_nits: 200.0, ..d }),
-        ("03_outmax300_srgb", TmVariant { out_srgb: true, output_max_nits: 300.0, ..d }),
-        ("04_inmax1000", TmVariant { input_max_nits: Some(1000.0), ..d }),
-        ("05_sat80", TmVariant { saturation: Some(0.8), ..d }),
-        ("06_sat70_outmax200", TmVariant { saturation: Some(0.7), output_max_nits: 200.0, ..d }),
-        ("07_srgb_sat80_outmax160", TmVariant { out_srgb: true, saturation: Some(0.8), output_max_nits: 160.0, ..d }),
+        (
+            "01_srgb",
+            TmVariant {
+                out_srgb: true,
+                ..d
+            },
+        ),
+        (
+            "02_outmax200",
+            TmVariant {
+                output_max_nits: 200.0,
+                ..d
+            },
+        ),
+        (
+            "03_outmax300_srgb",
+            TmVariant {
+                out_srgb: true,
+                output_max_nits: 300.0,
+                ..d
+            },
+        ),
+        (
+            "04_inmax1000",
+            TmVariant {
+                input_max_nits: Some(1000.0),
+                ..d
+            },
+        ),
+        (
+            "05_sat80",
+            TmVariant {
+                saturation: Some(0.8),
+                ..d
+            },
+        ),
+        (
+            "06_sat70_outmax200",
+            TmVariant {
+                saturation: Some(0.7),
+                output_max_nits: 200.0,
+                ..d
+            },
+        ),
+        (
+            "07_srgb_sat80_outmax160",
+            TmVariant {
+                out_srgb: true,
+                saturation: Some(0.8),
+                output_max_nits: 160.0,
+                ..d
+            },
+        ),
     ];
     std::fs::create_dir_all(outdir).ok();
     for (label, v) in variants {
@@ -600,7 +680,8 @@ fn query_displayconfig_sdr_white(device_name: &[u16; 32]) -> Option<f32> {
     unsafe {
         let mut path_count: u32 = 0;
         let mut mode_count: u32 = 0;
-        let rc = GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &mut path_count, &mut mode_count);
+        let rc =
+            GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &mut path_count, &mut mode_count);
         if rc != ERROR_SUCCESS {
             return None;
         }

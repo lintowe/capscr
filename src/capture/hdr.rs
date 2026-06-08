@@ -1,8 +1,10 @@
 use anyhow::{anyhow, Result};
 use image::RgbaImage;
 
-use super::tonemapping::{hdr10_to_sdr_bt2390, hlg_to_sdr_bt2390, scrgb_to_sdr_bt2390, TonemapParams};
 use super::current_tonemap_params;
+use super::tonemapping::{
+    hdr10_to_sdr_bt2390, hlg_to_sdr_bt2390, scrgb_to_sdr_bt2390, TonemapParams,
+};
 
 const MAX_HDR_DIMENSION: u32 = 16384;
 const MAX_HDR_PIXELS: usize = 256 * 1024 * 1024;
@@ -42,15 +44,25 @@ fn f16_to_f32(bits: u16) -> f32 {
 mod f16_tests {
     use super::f16_to_f32;
     #[test]
-    fn zero() { assert_eq!(f16_to_f32(0x0000), 0.0); }
+    fn zero() {
+        assert_eq!(f16_to_f32(0x0000), 0.0);
+    }
     #[test]
-    fn one() { assert!((f16_to_f32(0x3C00) - 1.0).abs() < 1e-6); }
+    fn one() {
+        assert!((f16_to_f32(0x3C00) - 1.0).abs() < 1e-6);
+    }
     #[test]
-    fn two() { assert!((f16_to_f32(0x4000) - 2.0).abs() < 1e-6); }
+    fn two() {
+        assert!((f16_to_f32(0x4000) - 2.0).abs() < 1e-6);
+    }
     #[test]
-    fn negative_one() { assert!((f16_to_f32(0xBC00) - -1.0).abs() < 1e-6); }
+    fn negative_one() {
+        assert!((f16_to_f32(0xBC00) - -1.0).abs() < 1e-6);
+    }
     #[test]
-    fn half() { assert!((f16_to_f32(0x3800) - 0.5).abs() < 1e-6); }
+    fn half() {
+        assert!((f16_to_f32(0x3800) - 0.5).abs() < 1e-6);
+    }
     #[test]
     fn srgb_white_on_hdr_display_via_scrgb() {
         // 3.125 in half-float (scRGB value for SDR-white at 250 nits)
@@ -211,14 +223,22 @@ impl HdrCapture {
     fn capture_sdr_fallback_at(&self, target: Option<(i32, i32)>) -> Result<RgbaImage> {
         use super::{Capture, ScreenCapture};
         let capture = match target {
-            Some((x, y)) => ScreenCapture::at_point(x, y)
-                .unwrap_or_else(|_| ScreenCapture::primary().unwrap_or_else(|_| ScreenCapture::new())),
+            Some((x, y)) => ScreenCapture::at_point(x, y).unwrap_or_else(|_| {
+                ScreenCapture::primary().unwrap_or_else(|_| ScreenCapture::new())
+            }),
             None => ScreenCapture::new(),
         };
         capture.capture()
     }
 
-    fn tonemap(&self, raw_data: &[u8], width: u32, height: u32, format: HdrFormat, sdr_white: f32) -> RgbaImage {
+    fn tonemap(
+        &self,
+        raw_data: &[u8],
+        width: u32,
+        height: u32,
+        format: HdrFormat,
+        sdr_white: f32,
+    ) -> RgbaImage {
         if width == 0 || height == 0 {
             return RgbaImage::new(1, 1);
         }
@@ -246,7 +266,11 @@ impl HdrCapture {
                     .map(|chunk| {
                         let bits = u16::from_le_bytes([chunk[0], chunk[1]]);
                         let v = f16_to_f32(bits);
-                        if v.is_finite() { v } else { 0.0 }
+                        if v.is_finite() {
+                            v
+                        } else {
+                            0.0
+                        }
                     })
                     .collect();
                 scrgb_to_sdr_bt2390(&float_data, width, height, sdr_white, params)
@@ -271,8 +295,8 @@ impl HdrCapture {
                     let g = ((packed >> 10) & 0x3FF) as u16;
                     let b = ((packed >> 20) & 0x3FF) as u16;
                     let a = ((packed >> 30) & 0x3) as u16; // 2 bits
-                    // hdr10_to_sdr_bt2390 normalises by 65535.0, so map our
-                    // 10-bit and 2-bit channels into the 16-bit space.
+                                                           // hdr10_to_sdr_bt2390 normalises by 65535.0, so map our
+                                                           // 10-bit and 2-bit channels into the 16-bit space.
                     u16_data.push(r << 6 | r >> 4); // 10-bit -> 16-bit via bit replication
                     u16_data.push(g << 6 | g >> 4);
                     u16_data.push(b << 6 | b >> 4);
@@ -327,7 +351,9 @@ mod windows_hdr {
         high: i32,
     }
 
-    static DEVICE_CACHE: OnceLock<Mutex<HashMap<AdapterLuid, (ID3D11Device, ID3D11DeviceContext)>>> = OnceLock::new();
+    static DEVICE_CACHE: OnceLock<
+        Mutex<HashMap<AdapterLuid, (ID3D11Device, ID3D11DeviceContext)>>,
+    > = OnceLock::new();
 
     // serialize CPU-HDR captures: the per-adapter device + immediate context in
     // DEVICE_CACHE are shared, and concurrent CopyResource/Map/Flush on one
@@ -339,10 +365,10 @@ mod windows_hdr {
     static HDR_CAPTURE_LOCK: Mutex<()> = Mutex::new(());
 
     use windows::core::Interface;
+    use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT;
     use windows::Win32::Graphics::Dxgi::{
         CreateDXGIFactory1, IDXGIAdapter1, IDXGIFactory1, IDXGIOutput, IDXGIOutput6,
     };
-    use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT;
 
     pub fn get_hdr_display_info() -> Result<HdrDisplayInfo> {
         unsafe {
@@ -359,7 +385,8 @@ mod windows_hdr {
                     if let Ok(output6) = output.cast::<IDXGIOutput6>() {
                         if let Ok(desc1) = output6.GetDesc1() {
                             let color_space = desc1.ColorSpace;
-                            let is_hdr = color_space.0 == 12 || color_space.0 == 13 || color_space.0 == 14;
+                            let is_hdr =
+                                color_space.0 == 12 || color_space.0 == 13 || color_space.0 == 14;
 
                             if is_hdr {
                                 // prefer the OS-reported SDR white level
@@ -371,9 +398,10 @@ mod windows_hdr {
                                 // what the user actually wants SDR to render
                                 // at, so it was systematically blowing out
                                 // SDR-on-HDR captures.
-                                let sdr_white_level = query_displayconfig_sdr_white(&desc1.DeviceName)
-                                    .unwrap_or(200.0)
-                                    .max(80.0);
+                                let sdr_white_level =
+                                    query_displayconfig_sdr_white(&desc1.DeviceName)
+                                        .unwrap_or(200.0)
+                                        .max(80.0);
 
                                 tracing::debug!(
                                     "hdr display info: colorspace={} sdr_white={:.0}nits max_lum={:.0}nits dxgi_max_full_frame={:.0}nits",
@@ -417,11 +445,10 @@ mod windows_hdr {
     // of 1000 means 80 nits (the SDR reference) and 3125 means 250 nits.
     fn query_displayconfig_sdr_white(device_name: &[u16; 32]) -> Option<f32> {
         use windows::Win32::Devices::Display::{
-            DisplayConfigGetDeviceInfo, GetDisplayConfigBufferSizes,
-            QueryDisplayConfig, DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME,
-            DISPLAYCONFIG_DEVICE_INFO_HEADER, DISPLAYCONFIG_MODE_INFO,
-            DISPLAYCONFIG_PATH_INFO, DISPLAYCONFIG_SOURCE_DEVICE_NAME,
-            DISPLAYCONFIG_SDR_WHITE_LEVEL, QDC_ONLY_ACTIVE_PATHS,
+            DisplayConfigGetDeviceInfo, GetDisplayConfigBufferSizes, QueryDisplayConfig,
+            DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME, DISPLAYCONFIG_DEVICE_INFO_HEADER,
+            DISPLAYCONFIG_MODE_INFO, DISPLAYCONFIG_PATH_INFO, DISPLAYCONFIG_SDR_WHITE_LEVEL,
+            DISPLAYCONFIG_SOURCE_DEVICE_NAME, QDC_ONLY_ACTIVE_PATHS,
         };
         use windows::Win32::Foundation::{ERROR_SUCCESS, WIN32_ERROR};
 
@@ -493,9 +520,8 @@ mod windows_hdr {
                     },
                     ..Default::default()
                 };
-                let rc = WIN32_ERROR(
-                    DisplayConfigGetDeviceInfo(&mut sdr_white.header as *mut _) as u32,
-                );
+                let rc =
+                    WIN32_ERROR(DisplayConfigGetDeviceInfo(&mut sdr_white.header as *mut _) as u32);
                 if rc != ERROR_SUCCESS {
                     continue;
                 }
@@ -555,26 +581,27 @@ mod windows_hdr {
         use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_UNKNOWN;
         use windows::Win32::Graphics::Direct3D11::{
             D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D,
-            D3D11_CPU_ACCESS_READ, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_MAP_READ,
-            D3D11_MAPPED_SUBRESOURCE, D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING,
-        };
-        use windows::Win32::Graphics::Dxgi::{
-            IDXGIOutput1, IDXGIOutput5, IDXGIResource, IDXGIOutputDuplication,
-            DXGI_OUTDUPL_FRAME_INFO, DXGI_ERROR_ACCESS_LOST, DXGI_ERROR_WAIT_TIMEOUT,
+            D3D11_CPU_ACCESS_READ, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_MAPPED_SUBRESOURCE,
+            D3D11_MAP_READ, D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING,
         };
         use windows::Win32::Graphics::Dxgi::Common::{
             DXGI_FORMAT, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_R10G10B10A2_UNORM,
             DXGI_FORMAT_R16G16B16A16_FLOAT,
         };
-
-
+        use windows::Win32::Graphics::Dxgi::{
+            IDXGIOutput1, IDXGIOutput5, IDXGIOutputDuplication, IDXGIResource,
+            DXGI_ERROR_ACCESS_LOST, DXGI_ERROR_WAIT_TIMEOUT, DXGI_OUTDUPL_FRAME_INFO,
+        };
 
         unsafe {
             let t_start = std::time::Instant::now();
             let factory: IDXGIFactory1 = CreateDXGIFactory1()?;
             let (adapter, output) = pick_adapter_output(&factory, target)?;
             let output1: IDXGIOutput1 = output.cast()?;
-            tracing::debug!("DXGI Factory + Output init took {}ms", t_start.elapsed().as_millis());
+            tracing::debug!(
+                "DXGI Factory + Output init took {}ms",
+                t_start.elapsed().as_millis()
+            );
 
             let t_dev = std::time::Instant::now();
             let desc = adapter.GetDesc1()?;
@@ -608,7 +635,10 @@ mod windows_hdr {
                     (device, context)
                 }
             };
-            tracing::debug!("D3D11CreateDevice retrieval/creation took {}ms", t_dev.elapsed().as_millis());
+            tracing::debug!(
+                "D3D11CreateDevice retrieval/creation took {}ms",
+                t_dev.elapsed().as_millis()
+            );
 
             let t_dup = std::time::Instant::now();
             let supported_formats: [DXGI_FORMAT; 3] = [
@@ -637,7 +667,11 @@ mod windows_hdr {
                 }
             }
 
-            let mut duplication = match duplicate_with_formats(&output1, &device, &supported_formats) {
+            let mut duplication = match duplicate_with_formats(
+                &output1,
+                &device,
+                &supported_formats,
+            ) {
                 Ok(d) => d,
                 Err(e) => {
                     tracing::warn!("duplicate_with_formats failed with cached device: {e:#}. Recreating D3D11 device...");
@@ -654,30 +688,38 @@ mod windows_hdr {
                         None,
                         Some(&mut context_opt),
                     )?;
-                    let new_device = device_opt.ok_or_else(|| anyhow!("Failed to recreate D3D11 device"))?;
-                    let new_context = context_opt.ok_or_else(|| anyhow!("Failed to get recreated device context"))?;
-                    
+                    let new_device =
+                        device_opt.ok_or_else(|| anyhow!("Failed to recreate D3D11 device"))?;
+                    let new_context = context_opt
+                        .ok_or_else(|| anyhow!("Failed to get recreated device context"))?;
+
                     {
                         let mut cache = cache_mutex.lock().unwrap();
                         cache.insert(luid, (new_device.clone(), new_context.clone()));
                     }
-                    
+
                     device = new_device;
                     context = new_context;
-                    
+
                     match duplicate_with_formats(&output1, &device, &supported_formats) {
                         Ok(d) => d,
-                        Err(e2) if e2.downcast_ref::<windows::core::Error>().map(|w| w.code()) == Some(DXGI_ERROR_ACCESS_LOST) => {
+                        Err(e2)
+                            if e2.downcast_ref::<windows::core::Error>().map(|w| w.code())
+                                == Some(DXGI_ERROR_ACCESS_LOST) =>
+                        {
                             std::thread::sleep(std::time::Duration::from_millis(200));
-                            duplicate_with_formats(&output1, &device, &supported_formats).map_err(|e3| {
-                                anyhow!("Display capture is locked by another app: {e3}")
-                            })?
+                            duplicate_with_formats(&output1, &device, &supported_formats).map_err(
+                                |e3| anyhow!("Display capture is locked by another app: {e3}"),
+                            )?
                         }
                         Err(e2) => return Err(e2),
                     }
                 }
             };
-            tracing::debug!("duplicate_with_formats took {}ms", t_dup.elapsed().as_millis());
+            tracing::debug!(
+                "duplicate_with_formats took {}ms",
+                t_dup.elapsed().as_millis()
+            );
 
             // fixed settle sleep before the first acquire. off the critical path
             // when CAPSCR_FAST_HDR=1 (see fast_hdr_acquire_enabled); default
@@ -698,11 +740,7 @@ mod windows_hdr {
 
             for attempt in 0..30 {
                 attempts += 1;
-                let res = duplication.AcquireNextFrame(
-                    10,
-                    &mut frame_info,
-                    &mut desktop_resource,
-                );
+                let res = duplication.AcquireNextFrame(10, &mut frame_info, &mut desktop_resource);
                 match res {
                     Ok(()) => {
                         let desktop_res = match desktop_resource.take() {
@@ -736,9 +774,11 @@ mod windows_hdr {
                             };
 
                             let bytes_per_pixel = get_bytes_per_pixel(tex_desc.Format);
-                            let row_bytes = (w as usize).checked_mul(bytes_per_pixel)
+                            let row_bytes = (w as usize)
+                                .checked_mul(bytes_per_pixel)
                                 .ok_or_else(|| anyhow!("Row size overflow"))?;
-                            let total_bytes = row_bytes.checked_mul(h as usize)
+                            let total_bytes = row_bytes
+                                .checked_mul(h as usize)
                                 .ok_or_else(|| anyhow!("Total size overflow"))?;
 
                             if total_bytes > MAX_HDR_PIXELS * 16 {
@@ -759,13 +799,24 @@ mod windows_hdr {
                             };
 
                             let mut staging_texture: Option<ID3D11Texture2D> = None;
-                            device.CreateTexture2D(&staging_desc, None, Some(&mut staging_texture))?;
-                            let staging_texture = staging_texture.ok_or_else(|| anyhow!("Failed to create staging texture"))?;
+                            device.CreateTexture2D(
+                                &staging_desc,
+                                None,
+                                Some(&mut staging_texture),
+                            )?;
+                            let staging_texture = staging_texture
+                                .ok_or_else(|| anyhow!("Failed to create staging texture"))?;
 
                             context.CopyResource(&staging_texture, &desktop_texture);
 
                             let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
-                            context.Map(&staging_texture, 0, D3D11_MAP_READ, 0, Some(&mut mapped))?;
+                            context.Map(
+                                &staging_texture,
+                                0,
+                                D3D11_MAP_READ,
+                                0,
+                                Some(&mut mapped),
+                            )?;
 
                             struct MapGuard<'a> {
                                 context: &'a ID3D11DeviceContext,
@@ -776,7 +827,10 @@ mod windows_hdr {
                                     unsafe { self.context.Unmap(self.texture, 0) };
                                 }
                             }
-                            let _map_guard = MapGuard { context: &context, texture: &staging_texture };
+                            let _map_guard = MapGuard {
+                                context: &context,
+                                texture: &staging_texture,
+                            };
 
                             let row_pitch = mapped.RowPitch as usize;
                             if row_pitch < row_bytes {
@@ -790,15 +844,18 @@ mod windows_hdr {
 
                             // check if the frame is completely black (all-zeros)
                             let first_row = std::slice::from_raw_parts(src_ptr, row_bytes);
-                            let is_zero = first_row.iter().all(|&b| b == 0) && {
-                                let mid_row = src_ptr.add(row_pitch * (h as usize / 2));
-                                let mid_slice = std::slice::from_raw_parts(mid_row, row_bytes);
-                                mid_slice.iter().all(|&b| b == 0)
-                            } && {
-                                let last_row = src_ptr.add(row_pitch * (h as usize - 1));
-                                let last_slice = std::slice::from_raw_parts(last_row, row_bytes);
-                                last_slice.iter().all(|&b| b == 0)
-                            };
+                            let is_zero = first_row.iter().all(|&b| b == 0)
+                                && {
+                                    let mid_row = src_ptr.add(row_pitch * (h as usize / 2));
+                                    let mid_slice = std::slice::from_raw_parts(mid_row, row_bytes);
+                                    mid_slice.iter().all(|&b| b == 0)
+                                }
+                                && {
+                                    let last_row = src_ptr.add(row_pitch * (h as usize - 1));
+                                    let last_slice =
+                                        std::slice::from_raw_parts(last_row, row_bytes);
+                                    last_slice.iter().all(|&b| b == 0)
+                                };
                             if is_zero {
                                 return Err(anyhow!("stale black frame detected"));
                             }
@@ -845,7 +902,11 @@ mod windows_hdr {
                     }
                 }
             }
-            tracing::debug!("AcquireNextFrame loop took {}ms (attempts={})", t_acq.elapsed().as_millis(), attempts);
+            tracing::debug!(
+                "AcquireNextFrame loop took {}ms (attempts={})",
+                t_acq.elapsed().as_millis(),
+                attempts
+            );
 
             if !acquired {
                 return Err(anyhow!(
@@ -952,7 +1013,9 @@ mod windows_hdr {
                             Some(&mut device),
                             None,
                             Some(&mut context),
-                        ).is_ok() {
+                        )
+                        .is_ok()
+                        {
                             if let (Some(dev), Some(ctx)) = (device, context) {
                                 e.insert((dev, ctx));
                             }
@@ -1011,6 +1074,10 @@ mod tests {
         let raw = vec![0u8; 2 * 2 * 8]; // all-zero scRGB 2x2 (8 bytes/pixel)
         let img = HdrCapture::new().tonemap(&raw, 2, 2, HdrFormat::ScRgb, 250.0);
         let p = img.get_pixel(0, 0);
-        assert_eq!([p[0], p[1], p[2]], [0, 0, 0], "black scRGB must stay black: {p:?}");
+        assert_eq!(
+            [p[0], p[1], p[2]],
+            [0, 0, 0],
+            "black scRGB must stay black: {p:?}"
+        );
     }
 }

@@ -15,14 +15,14 @@ use windows::core::Interface;
 use windows::Graphics::Capture::{Direct3D11CaptureFramePool, GraphicsCaptureItem};
 use windows::Graphics::DirectX::Direct3D11::IDirect3DDevice;
 use windows::Graphics::DirectX::DirectXPixelFormat;
+use windows::Win32::Foundation::HWND;
 use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_HARDWARE;
 use windows::Win32::Graphics::Direct3D11::{
     D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D, D3D11_CPU_ACCESS_READ,
-    D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_MAP_READ, D3D11_MAPPED_SUBRESOURCE, D3D11_SDK_VERSION,
+    D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_MAPPED_SUBRESOURCE, D3D11_MAP_READ, D3D11_SDK_VERSION,
     D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING,
 };
 use windows::Win32::Graphics::Dxgi::IDXGIDevice;
-use windows::Win32::Foundation::HWND;
 use windows::Win32::Graphics::Gdi::HMONITOR;
 use windows::Win32::System::WinRT::Direct3D11::{
     CreateDirect3D11DeviceFromDXGIDevice, IDirect3DDxgiInterfaceAccess,
@@ -93,10 +93,11 @@ fn capture_item(item: GraphicsCaptureItem) -> Result<RgbaImage> {
         )
         .map_err(|e| anyhow!("D3D11CreateDevice: {e}"))?;
         let device = device.ok_or_else(|| anyhow!("D3D11CreateDevice returned null device"))?;
-        let context =
-            context.ok_or_else(|| anyhow!("D3D11CreateDevice returned null context"))?;
+        let context = context.ok_or_else(|| anyhow!("D3D11CreateDevice returned null context"))?;
 
-        let dxgi_device: IDXGIDevice = device.cast().map_err(|e| anyhow!("cast IDXGIDevice: {e}"))?;
+        let dxgi_device: IDXGIDevice = device
+            .cast()
+            .map_err(|e| anyhow!("cast IDXGIDevice: {e}"))?;
         let winrt_device_inspectable = CreateDirect3D11DeviceFromDXGIDevice(&dxgi_device)
             .map_err(|e| anyhow!("CreateDirect3D11DeviceFromDXGIDevice: {e}"))?;
         let winrt_device: IDirect3DDevice = winrt_device_inspectable
@@ -122,7 +123,9 @@ fn capture_item(item: GraphicsCaptureItem) -> Result<RgbaImage> {
         // pressing a hotkey, the cursor in the result is rarely wanted.
         let _ = session.SetIsCursorCaptureEnabled(false);
 
-        session.StartCapture().map_err(|e| anyhow!("StartCapture: {e}"))?;
+        session
+            .StartCapture()
+            .map_err(|e| anyhow!("StartCapture: {e}"))?;
 
         // poll for a non-black frame as WGC's frame pool is asynchronous
         // and may occasionally deliver all-zero pixels in the first frame
@@ -164,14 +167,18 @@ fn capture_item(item: GraphicsCaptureItem) -> Result<RgbaImage> {
             let access: IDirect3DDxgiInterfaceAccess = match surface.cast() {
                 Ok(a) => a,
                 Err(e) => {
-                    tracing::warn!("WGC: cast IDirect3DDxgiInterfaceAccess failed on attempt {attempt}: {e}");
+                    tracing::warn!(
+                        "WGC: cast IDirect3DDxgiInterfaceAccess failed on attempt {attempt}: {e}"
+                    );
                     continue 'retry;
                 }
             };
             let frame_texture: ID3D11Texture2D = match access.GetInterface() {
                 Ok(t) => t,
                 Err(e) => {
-                    tracing::warn!("WGC: GetInterface ID3D11Texture2D failed on attempt {attempt}: {e}");
+                    tracing::warn!(
+                        "WGC: GetInterface ID3D11Texture2D failed on attempt {attempt}: {e}"
+                    );
                     continue 'retry;
                 }
             };
@@ -233,15 +240,17 @@ fn capture_item(item: GraphicsCaptureItem) -> Result<RgbaImage> {
             // check if the frame is completely black (all-zeros)
             let is_zero = {
                 let first_row = std::slice::from_raw_parts(src_ptr, row_bytes);
-                first_row.iter().all(|&b| b == 0) && {
-                    let mid_row = src_ptr.add(row_pitch * (h as usize / 2));
-                    let mid_slice = std::slice::from_raw_parts(mid_row, row_bytes);
-                    mid_slice.iter().all(|&b| b == 0)
-                } && {
-                    let last_row = src_ptr.add(row_pitch * (h as usize - 1));
-                    let last_slice = std::slice::from_raw_parts(last_row, row_bytes);
-                    last_slice.iter().all(|&b| b == 0)
-                }
+                first_row.iter().all(|&b| b == 0)
+                    && {
+                        let mid_row = src_ptr.add(row_pitch * (h as usize / 2));
+                        let mid_slice = std::slice::from_raw_parts(mid_row, row_bytes);
+                        mid_slice.iter().all(|&b| b == 0)
+                    }
+                    && {
+                        let last_row = src_ptr.add(row_pitch * (h as usize - 1));
+                        let last_slice = std::slice::from_raw_parts(last_row, row_bytes);
+                        last_slice.iter().all(|&b| b == 0)
+                    }
             };
 
             if is_zero {
@@ -262,7 +271,9 @@ fn capture_item(item: GraphicsCaptureItem) -> Result<RgbaImage> {
             let src_addr = src_ptr as usize;
 
             std::thread::scope(|s| {
-                for (chunk_idx, dst_chunk) in rgba_buf.chunks_mut(rows_per_chunk * row_bytes).enumerate() {
+                for (chunk_idx, dst_chunk) in
+                    rgba_buf.chunks_mut(rows_per_chunk * row_bytes).enumerate()
+                {
                     let start_row = chunk_idx * rows_per_chunk;
                     s.spawn(move || {
                         let rows = dst_chunk.len() / row_bytes;
@@ -272,7 +283,7 @@ fn capture_item(item: GraphicsCaptureItem) -> Result<RgbaImage> {
                             let dst_row = &mut dst_chunk[r * row_bytes..(r + 1) * row_bytes];
                             for x in 0..(w as usize) {
                                 let off = x * 4;
-                                dst_row[off]     = *src.add(off + 2);
+                                dst_row[off] = *src.add(off + 2);
                                 dst_row[off + 1] = *src.add(off + 1);
                                 dst_row[off + 2] = *src.add(off);
                                 dst_row[off + 3] = *src.add(off + 3);
@@ -295,7 +306,9 @@ fn capture_item(item: GraphicsCaptureItem) -> Result<RgbaImage> {
         let _ = pool.Close();
 
         if !acquired {
-            return Err(anyhow!("WGC: failed to acquire non-black frame after 10 attempts"));
+            return Err(anyhow!(
+                "WGC: failed to acquire non-black frame after 10 attempts"
+            ));
         }
 
         let rgba_data = rgba.ok_or_else(|| anyhow!("WGC: missing rgba data"))?;

@@ -14,16 +14,16 @@ mod windows_impl {
             Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM},
             Graphics::Gdi::{
                 BeginPaint, CreatePen, DeleteObject, EndPaint, GetStockObject, InvalidateRect,
-                SelectObject, SetBkMode, HOLLOW_BRUSH, PAINTSTRUCT, PS_SOLID, TRANSPARENT,
-                Rectangle as GdiRectangle,
+                Rectangle as GdiRectangle, SelectObject, SetBkMode, HOLLOW_BRUSH, PAINTSTRUCT,
+                PS_SOLID, TRANSPARENT,
             },
             System::LibraryLoader::GetModuleHandleW,
             UI::WindowsAndMessaging::{
                 CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW,
                 KillTimer, PostMessageW, RegisterClassW, SetLayeredWindowAttributes, SetTimer,
-                ShowWindow, TranslateMessage, CS_HREDRAW, CS_VREDRAW, LWA_COLORKEY, MSG,
-                SW_HIDE, SW_SHOWNA, WM_DESTROY, WM_PAINT, WM_TIMER, WM_USER, WNDCLASSW,
-                WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
+                ShowWindow, TranslateMessage, CS_HREDRAW, CS_VREDRAW, LWA_COLORKEY, MSG, SW_HIDE,
+                SW_SHOWNA, WM_DESTROY, WM_PAINT, WM_TIMER, WM_USER, WNDCLASSW, WS_EX_LAYERED,
+                WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_POPUP,
             },
         },
     };

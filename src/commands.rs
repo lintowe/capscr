@@ -93,19 +93,25 @@ pub fn set_config(
             && config.upload.ftp.password_encrypted.is_empty()
             && !stored.upload.ftp.password_encrypted.is_empty()
         {
-            config.upload.ftp.password_encrypted =
-                stored.upload.ftp.password_encrypted.clone();
+            config.upload.ftp.password_encrypted = stored.upload.ftp.password_encrypted.clone();
         }
         if config.upload.sftp.password.is_empty()
             && config.upload.sftp.password_encrypted.is_empty()
             && !stored.upload.sftp.password_encrypted.is_empty()
         {
-            config.upload.sftp.password_encrypted =
-                stored.upload.sftp.password_encrypted.clone();
+            config.upload.sftp.password_encrypted = stored.upload.sftp.password_encrypted.clone();
         }
         if config.upload.sftp.private_key_passphrase.is_empty()
-            && config.upload.sftp.private_key_passphrase_encrypted.is_empty()
-            && !stored.upload.sftp.private_key_passphrase_encrypted.is_empty()
+            && config
+                .upload
+                .sftp
+                .private_key_passphrase_encrypted
+                .is_empty()
+            && !stored
+                .upload
+                .sftp
+                .private_key_passphrase_encrypted
+                .is_empty()
         {
             config.upload.sftp.private_key_passphrase_encrypted =
                 stored.upload.sftp.private_key_passphrase_encrypted.clone();
@@ -126,7 +132,10 @@ pub fn set_config(
     let want_autostart = config.ui.auto_start;
     let output_dir = config.output.directory.clone();
     *state.config.lock().unwrap() = config;
-    if let Err(e) = app.asset_protocol_scope().allow_directory(&output_dir, true) {
+    if let Err(e) = app
+        .asset_protocol_scope()
+        .allow_directory(&output_dir, true)
+    {
         tracing::warn!("asset scope allow_directory({:?}) failed: {e}", output_dir);
     }
     if let Ok(dir_can) = std::fs::canonicalize(&output_dir) {
@@ -206,7 +215,10 @@ fn humanize_capture_error(e: &anyhow::Error) -> String {
     let s = raw.to_lowercase();
     if s.contains("d3d11") || s.contains("device") || s.contains("dxgi") {
         "GPU couldn't initialise the capture pipeline. Try updating your graphics driver or rebooting.".into()
-    } else if s.contains("no monitor") || s.contains("no display") || s.contains("monitor not found") {
+    } else if s.contains("no monitor")
+        || s.contains("no display")
+        || s.contains("monitor not found")
+    {
         "capscr couldn't find a display. If you just unplugged a monitor, try again or restart capscr.".into()
     } else if s.contains("access is denied") || s.contains("permission") || s.contains("denied") {
         "Windows blocked the capture. Run capscr as administrator or check Settings > Privacy > Screen recording.".into()
@@ -253,7 +265,6 @@ fn run_capture_pipeline_inner(
         UnifiedSelector::cancel_active_selection();
         return Ok(());
     }
-
 
     use std::sync::atomic::Ordering;
     let gate_state = app.state::<AppState>();
@@ -311,7 +322,10 @@ fn run_capture_pipeline_inner(
         let t0 = std::time::Instant::now();
         match ScreenCapture::all_monitors() {
             Ok(img) => {
-                tracing::info!("Captured full screen freeze-frame in {}ms", t0.elapsed().as_millis());
+                tracing::info!(
+                    "Captured full screen freeze-frame in {}ms",
+                    t0.elapsed().as_millis()
+                );
                 Some(Arc::new(img))
             }
             Err(e) => {
@@ -332,7 +346,11 @@ fn run_capture_pipeline_inner(
 
     tracing::info!("run_capture_pipeline_inner: selection = {selection:?}");
 
-    let (mut image, mut hdr_bitmap, screen_origin): (image::RgbaImage, Option<crate::capture::HdrBitmap>, Option<(i32, i32)>) = match selection {
+    let (mut image, mut hdr_bitmap, screen_origin): (
+        image::RgbaImage,
+        Option<crate::capture::HdrBitmap>,
+        Option<(i32, i32)>,
+    ) = match selection {
         SelectionResult::Cancelled => return Ok(()),
         SelectionResult::Region(rect) => {
             if let Some(frozen) = &frozen_frame {
@@ -354,7 +372,9 @@ fn run_capture_pipeline_inner(
                 let crop_width = rect.width.min(frozen.width().saturating_sub(img_x));
                 let crop_height = rect.height.min(frozen.height().saturating_sub(img_y));
                 if crop_width > 0 && crop_height > 0 {
-                    let cropped = image::imageops::crop_imm(&**frozen, img_x, img_y, crop_width, crop_height).to_image();
+                    let cropped =
+                        image::imageops::crop_imm(&**frozen, img_x, img_y, crop_width, crop_height)
+                            .to_image();
                     (cropped, None, Some((rect.x, rect.y)))
                 } else {
                     (
@@ -375,9 +395,11 @@ fn run_capture_pipeline_inner(
             if let Some(frozen) = &frozen_frame {
                 #[cfg(windows)]
                 unsafe {
+                    use windows::Win32::Foundation::{HWND, RECT};
+                    use windows::Win32::Graphics::Dwm::{
+                        DwmGetWindowAttribute, DWMWA_EXTENDED_FRAME_BOUNDS,
+                    };
                     use windows::Win32::UI::WindowsAndMessaging::GetWindowRect;
-                    use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_EXTENDED_FRAME_BOUNDS};
-                    use windows::Win32::Foundation::{RECT, HWND};
                     let mut rect = RECT::default();
                     let hwnd_struct = HWND(hwnd as *mut _);
                     let dwm_ok = DwmGetWindowAttribute(
@@ -385,15 +407,17 @@ fn run_capture_pipeline_inner(
                         DWMWA_EXTENDED_FRAME_BOUNDS,
                         &mut rect as *mut RECT as *mut _,
                         std::mem::size_of::<RECT>() as u32,
-                    ).is_ok();
+                    )
+                    .is_ok();
                     if dwm_ok || GetWindowRect(hwnd_struct, &mut rect).is_ok() {
-                        let (min_x, min_y) = if let Ok(monitors) = crate::capture::fast_list_monitors() {
-                            let mx = monitors.iter().map(|m| m.x).min().unwrap_or(0);
-                            let my = monitors.iter().map(|m| m.y).min().unwrap_or(0);
-                            (mx, my)
-                        } else {
-                            (0, 0)
-                        };
+                        let (min_x, min_y) =
+                            if let Ok(monitors) = crate::capture::fast_list_monitors() {
+                                let mx = monitors.iter().map(|m| m.x).min().unwrap_or(0);
+                                let my = monitors.iter().map(|m| m.y).min().unwrap_or(0);
+                                (mx, my)
+                            } else {
+                                (0, 0)
+                            };
 
                         let w_x = rect.left;
                         let w_y = rect.top;
@@ -406,7 +430,14 @@ fn run_capture_pipeline_inner(
                         let crop_height = w_h.min(frozen.height().saturating_sub(img_y));
 
                         if crop_width > 0 && crop_height > 0 {
-                            let cropped = image::imageops::crop_imm(&**frozen, img_x, img_y, crop_width, crop_height).to_image();
+                            let cropped = image::imageops::crop_imm(
+                                &**frozen,
+                                img_x,
+                                img_y,
+                                crop_width,
+                                crop_height,
+                            )
+                            .to_image();
                             (cropped, None, Some((w_x, w_y)))
                         } else {
                             let cap = WindowCapture::new(hwnd);
@@ -523,8 +554,7 @@ fn run_capture_pipeline_inner(
         maybe_write_hdr_sidecar(&path, &hdr_bitmap, &config);
         *state.last_save.lock().unwrap() = Some(path.clone());
         notify_capture_saved(app, &path);
-        open_editor_window(app, &path.to_string_lossy())
-            .map_err(|e| anyhow::anyhow!(e))?;
+        open_editor_window(app, &path.to_string_lossy()).map_err(|e| anyhow::anyhow!(e))?;
         Sound::Screenshot.play_if_enabled(config.post_capture.play_sound);
         if config.ui.show_notifications {
             let _ = show_notification("Capture opened", &path.to_string_lossy());
@@ -653,9 +683,8 @@ fn capture_active_monitor_with_hdr(
         }
     }
     let capture = match target {
-        Some((x, y)) => ScreenCapture::at_point(x, y).unwrap_or_else(|_| {
-            ScreenCapture::primary().unwrap_or_else(|_| ScreenCapture::new())
-        }),
+        Some((x, y)) => ScreenCapture::at_point(x, y)
+            .unwrap_or_else(|_| ScreenCapture::primary().unwrap_or_else(|_| ScreenCapture::new())),
         None => ScreenCapture::primary().unwrap_or_else(|_| ScreenCapture::new()),
     };
     Ok((capture.capture()?, None))
@@ -741,14 +770,17 @@ fn run_post_action(
 ) -> anyhow::Result<Option<PathBuf>> {
     let config = state.config.lock().unwrap().clone();
 
-    let do_save_async = |img: Arc<RgbaImage>, hdr: Option<crate::capture::HdrBitmap>, app_handle: AppHandle| -> anyhow::Result<PathBuf> {
+    let do_save_async = |img: Arc<RgbaImage>,
+                         hdr: Option<crate::capture::HdrBitmap>,
+                         app_handle: AppHandle|
+     -> anyhow::Result<PathBuf> {
         let base = config.output_path();
         let path = get_unique_filepath(&base);
         if let Err(e) = std::fs::create_dir_all(&config.output.directory) {
             tracing::warn!("failed to create output dir: {e}");
         }
         *state.last_save.lock().unwrap() = Some(path.clone());
-        
+
         let path_clone = path.clone();
         let format = config.output.format;
         let quality = config.output.quality;
@@ -759,14 +791,20 @@ fn run_post_action(
                 tracing::error!("Background save_image failed: {e:#}");
             } else {
                 maybe_write_hdr_sidecar(&path_clone, &hdr, &config_clone);
-                tracing::info!("Background save completed in {}ms", t0.elapsed().as_millis());
+                tracing::info!(
+                    "Background save completed in {}ms",
+                    t0.elapsed().as_millis()
+                );
                 notify_capture_saved(&app_handle, &path_clone);
             }
         });
         Ok(path)
     };
 
-    let do_save_to_history_async = |img: Arc<RgbaImage>, hdr: Option<crate::capture::HdrBitmap>, app_handle: AppHandle| -> Option<PathBuf> {
+    let do_save_to_history_async = |img: Arc<RgbaImage>,
+                                    hdr: Option<crate::capture::HdrBitmap>,
+                                    app_handle: AppHandle|
+     -> Option<PathBuf> {
         if !config.ui.save_clipboard_to_history {
             return None;
         }
@@ -782,7 +820,7 @@ fn run_post_action(
             history_dir.join(format!("{name}.{ext}"))
         };
         let path = get_unique_filepath(&base);
-        
+
         let path_clone = path.clone();
         let format = config.output.format;
         let quality = config.output.quality;
@@ -793,7 +831,10 @@ fn run_post_action(
                 tracing::error!("Background save_image to history failed: {e:#}");
             } else {
                 maybe_write_hdr_sidecar(&path_clone, &hdr, &config_clone);
-                tracing::info!("Background save to history completed in {}ms", t0.elapsed().as_millis());
+                tracing::info!(
+                    "Background save to history completed in {}ms",
+                    t0.elapsed().as_millis()
+                );
                 notify_capture_saved(&app_handle, &path_clone);
             }
         });
@@ -831,7 +872,8 @@ fn run_post_action(
             Ok(Some(path))
         }
         PostCaptureAction::CopyToClipboard => {
-            let history_path = do_save_to_history_async(image.clone(), hdr_bitmap.clone(), app.clone());
+            let history_path =
+                do_save_to_history_async(image.clone(), hdr_bitmap.clone(), app.clone());
             let clipboard_ok = do_clipboard().is_ok();
             Sound::Screenshot.play_if_enabled(config.post_capture.play_sound);
             if config.ui.show_notifications {
@@ -864,7 +906,8 @@ fn run_post_action(
             Ok(Some(path))
         }
         PostCaptureAction::Upload => {
-            let history_path = do_save_to_history_async(image.clone(), hdr_bitmap.clone(), app.clone());
+            let history_path =
+                do_save_to_history_async(image.clone(), hdr_bitmap.clone(), app.clone());
             let result = do_upload()?;
             Sound::Upload.play_if_enabled(config.post_capture.play_sound);
             if config.ui.show_notifications {
@@ -888,7 +931,8 @@ fn run_post_action(
             Ok(Some(path))
         }
         PostCaptureAction::DoNothing => {
-            let history_path = do_save_to_history_async(image.clone(), hdr_bitmap.clone(), app.clone());
+            let history_path =
+                do_save_to_history_async(image.clone(), hdr_bitmap.clone(), app.clone());
             Sound::Screenshot.play_if_enabled(config.post_capture.play_sound);
             if config.ui.show_notifications {
                 let _ = show_notification("Capture complete", "Screenshot taken successfully.");
@@ -959,7 +1003,10 @@ pub fn list_captures(state: State<AppState>) -> Result<Vec<HistoryEntry>, String
             .and_then(|e| e.to_str())
             .map(|s| s.to_lowercase())
             .unwrap_or_default();
-        if !matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "mp4") {
+        if !matches!(
+            ext.as_str(),
+            "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "mp4"
+        ) {
             continue;
         }
         let filename = path
@@ -1059,13 +1106,16 @@ pub fn copy_capture_to_clipboard(path: String, state: State<AppState>) -> Result
     if !is_path_allowed(&canonical, &config) {
         return Err("Path is outside the allowed directories".into());
     }
-    let ext = canonical.extension()
+    let ext = canonical
+        .extension()
         .and_then(|e| e.to_str())
         .map(|s| s.to_lowercase())
         .unwrap_or_default();
     if ext == "gif" || ext == "mp4" {
         let mut cb = ClipboardManager::new().map_err(|e| e.to_string())?;
-        return cb.copy_text(&canonical.to_string_lossy()).map_err(|e| e.to_string());
+        return cb
+            .copy_text(&canonical.to_string_lossy())
+            .map_err(|e| e.to_string());
     }
     let img = image::open(&canonical).map_err(|e| e.to_string())?;
     let rgba = img.into_rgba8();
@@ -1087,15 +1137,22 @@ pub fn reupload_capture(
     }
     // GIF files contain animation data that image::open drops to the first frame.
     // upload the raw file bytes via a dedicated path instead of re-encoding.
-    let ext = canonical.extension()
+    let ext = canonical
+        .extension()
         .and_then(|e| e.to_str())
         .map(|s| s.to_lowercase())
         .unwrap_or_default();
     if ext == "gif" {
-        return Err("GIF reupload is not yet supported — open the file manually and upload it from there".into());
+        return Err(
+            "GIF reupload is not yet supported — open the file manually and upload it from there"
+                .into(),
+        );
     }
     if ext == "mp4" {
-        return Err("MP4 reupload is not yet supported — open the file manually and upload it from there".into());
+        return Err(
+            "MP4 reupload is not yet supported — open the file manually and upload it from there"
+                .into(),
+        );
     }
     let mime = match ext.as_str() {
         "jpg" | "jpeg" => "image/jpeg",
@@ -1104,13 +1161,16 @@ pub fn reupload_capture(
         _ => "image/png",
     };
     let bytes = std::fs::read(&canonical).map_err(|e| e.to_string())?;
-    let file_name = canonical.file_name()
+    let file_name = canonical
+        .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("capture")
         .to_string();
     let uploader = crate::upload::shared_uploader().map_err(|e| e.to_string())?;
     let service = build_upload_service(&config);
-    let result = uploader.upload_raw(&bytes, mime, &file_name, &service).map_err(|e| e.to_string())?;
+    let result = uploader
+        .upload_raw(&bytes, mime, &file_name, &service)
+        .map_err(|e| e.to_string())?;
     state.record_upload(UploadRecord {
         url: result.url.clone(),
         delete_url: result.delete_url.clone(),
@@ -1221,7 +1281,11 @@ pub async fn install_update(app: AppHandle) -> Result<(), String> {
     {
         let state = app.state::<AppState>();
         let mut waited = 0u32;
-        while state.capture_in_progress.load(std::sync::atomic::Ordering::SeqCst) && waited < 50 {
+        while state
+            .capture_in_progress
+            .load(std::sync::atomic::Ordering::SeqCst)
+            && waited < 50
+        {
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             waited += 1;
         }
@@ -1333,8 +1397,7 @@ pub fn open_editor(path: String, app: AppHandle, state: State<AppState>) -> Resu
     let buf = PathBuf::from(&path);
     let canonical = std::fs::canonicalize(&buf).map_err(|e| e.to_string())?;
     let cfg = state.config.lock().unwrap().clone();
-    let dir_canonical =
-        std::fs::canonicalize(&cfg.output.directory).map_err(|e| e.to_string())?;
+    let dir_canonical = std::fs::canonicalize(&cfg.output.directory).map_err(|e| e.to_string())?;
     if !canonical.starts_with(&dir_canonical) {
         return Err("Path is outside the configured output directory".into());
     }
@@ -1369,10 +1432,7 @@ pub fn save_edited_image(
     // or permission-denied mid-write would otherwise truncate the original
     // — the user would lose the un-edited capture too.
     let mut tmp = buf.clone();
-    let stem = buf
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or("edited");
+    let stem = buf.file_name().and_then(|s| s.to_str()).unwrap_or("edited");
     tmp.set_file_name(format!(".{stem}.editing.tmp"));
     if let Err(e) = std::fs::write(&tmp, &bytes) {
         let _ = std::fs::remove_file(&tmp);
@@ -1478,7 +1538,9 @@ pub fn upload_edited_image(
     let config = state.config.lock().unwrap().clone();
     let uploader = crate::upload::shared_uploader().map_err(|e| e.to_string())?;
     let service = build_upload_service(&config);
-    let result = uploader.upload(&rgba, &service).map_err(|e| e.to_string())?;
+    let result = uploader
+        .upload(&rgba, &service)
+        .map_err(|e| e.to_string())?;
     state.record_upload(UploadRecord {
         url: result.url.clone(),
         delete_url: result.delete_url.clone(),
@@ -1513,11 +1575,7 @@ pub fn trigger_task(app: &AppHandle, task_id: &str) {
     std::thread::spawn(move || {
         if let Err(e) = run_task(&task, &app_handle) {
             tracing::warn!("task '{}' failed: {e}", task.id);
-            emit_error(
-                &app_handle,
-                "task",
-                &format!("{}: {}", task_label, e),
-            );
+            emit_error(&app_handle, "task", &format!("{}: {}", task_label, e));
             let state = app_handle.state::<AppState>();
             let show = state.config.lock().unwrap().ui.show_notifications;
             if show {
@@ -1528,7 +1586,10 @@ pub fn trigger_task(app: &AppHandle, task_id: &str) {
 }
 
 pub fn run_task(task: &CaptureTask, app: &AppHandle) -> anyhow::Result<()> {
-    if matches!(task.capture_mode, TaskCaptureMode::RegionGif | TaskCaptureMode::RegionMp4) {
+    if matches!(
+        task.capture_mode,
+        TaskCaptureMode::RegionGif | TaskCaptureMode::RegionMp4
+    ) {
         return run_gif_task(task, app);
     }
     let mode = match task.capture_mode {
@@ -1561,7 +1622,8 @@ fn run_gif_task(task: &CaptureTask, app: &AppHandle) -> anyhow::Result<()> {
         } else {
             let active_name = {
                 let cfg = state.config.lock().unwrap();
-                active_id.as_deref()
+                active_id
+                    .as_deref()
                     .and_then(|id| cfg.capture_tasks.iter().find(|t| t.id == id))
                     .map(|t| t.name.clone())
                     .unwrap_or_else(|| "another task".to_string())
@@ -1586,7 +1648,8 @@ fn run_gif_task(task: &CaptureTask, app: &AppHandle) -> anyhow::Result<()> {
     // gate is held only during selection so a screenshot hotkey pressed while
     // the region selector is visible doesn't open a second overlay
     use std::sync::atomic::Ordering as OrdGif;
-    if state.capture_in_progress
+    if state
+        .capture_in_progress
         .compare_exchange(false, true, OrdGif::SeqCst, OrdGif::SeqCst)
         .is_err()
     {
@@ -1689,7 +1752,9 @@ fn finalize_gif_recording(task: &CaptureTask, app: &AppHandle) {
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
         while !matches!(rec.state(), crate::recording::RecordingState::Processing) {
             if std::time::Instant::now() >= deadline {
-                tracing::warn!("gif capture thread did not finish within 5s; saving partial frames");
+                tracing::warn!(
+                    "gif capture thread did not finish within 5s; saving partial frames"
+                );
                 break;
             }
             std::thread::sleep(Duration::from_millis(20));
@@ -1745,7 +1810,12 @@ fn set_tray_tooltip(app: &AppHandle, tooltip: &str) {
     }
 }
 
-fn apply_gif_post_action(task: &CaptureTask, app: &AppHandle, path: &std::path::Path, cfg: &Config) {
+fn apply_gif_post_action(
+    task: &CaptureTask,
+    app: &AppHandle,
+    path: &std::path::Path,
+    cfg: &Config,
+) {
     match task.post_action {
         TaskPostAction::Clipboard | TaskPostAction::SaveAndClipboard => {
             // clipboard support for animated gif/mp4 varies wildly across oses/apps
@@ -1858,10 +1928,7 @@ pub fn emit_error(app: &AppHandle, kind: &str, msg: &str) {
 // fires the plugin on_capture_saved hook. every save path routes through here so
 // the hook can't silently miss a save site
 pub fn notify_capture_saved(app: &AppHandle, path: &std::path::Path) {
-    let _ = app.emit(
-        "capscr://capture-saved",
-        path.to_string_lossy().to_string(),
-    );
+    let _ = app.emit("capscr://capture-saved", path.to_string_lossy().to_string());
     let state = app.state::<AppState>();
     let pm = state.plugin_manager.read().unwrap();
     let _ = pm.dispatch(&PluginEvent::PostSave {
@@ -1974,7 +2041,8 @@ mod plugin_listing_tests {
 
     #[test]
     fn reads_legacy_flat_manifest() {
-        let body = "name = \"Sounds\"\nversion = \"0.1.0\"\ndescription = \"sfx\"\nenabled = true\n";
+        let body =
+            "name = \"Sounds\"\nversion = \"0.1.0\"\ndescription = \"sfx\"\nenabled = true\n";
         let (name, version, _desc, enabled) = read_plugin_listing(body).expect("flat parses");
         assert_eq!(name, "Sounds");
         assert_eq!(version, "0.1.0");
@@ -2051,8 +2119,16 @@ pub fn open_plugins_folder(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn marketplace_browse(state: State<'_, AppState>) -> Result<Vec<crate::marketplace::RegistryEntry>, String> {
-    let url = state.config.lock().unwrap().marketplace.registry_url.clone();
+pub async fn marketplace_browse(
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::marketplace::RegistryEntry>, String> {
+    let url = state
+        .config
+        .lock()
+        .unwrap()
+        .marketplace
+        .registry_url
+        .clone();
     // reqwest::blocking inside an async command — push to a worker thread so
     // we don't park the tokio runtime.
     tokio::task::spawn_blocking(move || crate::marketplace::fetch_registry(&url))
@@ -2064,7 +2140,13 @@ pub async fn marketplace_browse(state: State<'_, AppState>) -> Result<Vec<crate:
 
 #[tauri::command]
 pub async fn marketplace_install(id: String, state: State<'_, AppState>) -> Result<(), String> {
-    let url = state.config.lock().unwrap().marketplace.registry_url.clone();
+    let url = state
+        .config
+        .lock()
+        .unwrap()
+        .marketplace
+        .registry_url
+        .clone();
     let plugins = plugins_dir()?;
     tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
         let registry = crate::marketplace::fetch_registry(&url)?;
@@ -2302,10 +2384,8 @@ pub fn test_upload_connection(
             };
             crate::upload::test_connection_sftp(&target).map_err(|e| e.to_string())?
         }
-        "Imgur" | "imgur" => {
-            crate::upload::test_connection_imgur(&cfg.upload.imgur_client_id)
-                .map_err(|e| e.to_string())?
-        }
+        "Imgur" | "imgur" => crate::upload::test_connection_imgur(&cfg.upload.imgur_client_id)
+            .map_err(|e| e.to_string())?,
         "Custom" | "custom" => {
             let uploader = crate::upload::CustomUploader {
                 name: "Custom".to_string(),
@@ -2400,5 +2480,3 @@ pub fn set_hotkeys_disabled(
     let _ = app.emit("capscr://hotkey-status", ());
     Ok(())
 }
-
-

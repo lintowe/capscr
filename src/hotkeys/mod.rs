@@ -34,13 +34,23 @@ pub fn format_vk_mods(vk: u32, mods: u8) -> String {
     let mut parts: Vec<&str> = Vec::new();
     #[cfg(windows)]
     {
-        if mods & ll_hook::MOD_CTRL != 0 { parts.push("Ctrl"); }
-        if mods & ll_hook::MOD_ALT != 0 { parts.push("Alt"); }
-        if mods & ll_hook::MOD_SHIFT != 0 { parts.push("Shift"); }
-        if mods & ll_hook::MOD_WIN != 0 { parts.push("Win"); }
+        if mods & ll_hook::MOD_CTRL != 0 {
+            parts.push("Ctrl");
+        }
+        if mods & ll_hook::MOD_ALT != 0 {
+            parts.push("Alt");
+        }
+        if mods & ll_hook::MOD_SHIFT != 0 {
+            parts.push("Shift");
+        }
+        if mods & ll_hook::MOD_WIN != 0 {
+            parts.push("Win");
+        }
     }
     #[cfg(not(windows))]
-    { let _ = mods; }
+    {
+        let _ = mods;
+    }
     let key = vk_to_name(vk).unwrap_or_else(|| format!("VK_0x{:02X}", vk));
     if parts.is_empty() {
         key
@@ -58,12 +68,30 @@ fn vk_to_name(vk: u32) -> Option<String> {
         0x30..=0x39 => return Some(((vk as u8) as char).to_string()),
         0x05 => "Mouse4",
         0x06 => "Mouse5",
-        0x70 => "F1", 0x71 => "F2", 0x72 => "F3", 0x73 => "F4",
-        0x74 => "F5", 0x75 => "F6", 0x76 => "F7", 0x77 => "F8",
-        0x78 => "F9", 0x79 => "F10", 0x7A => "F11", 0x7B => "F12",
-        0x7C => "F13", 0x7D => "F14", 0x7E => "F15", 0x7F => "F16",
-        0x80 => "F17", 0x81 => "F18", 0x82 => "F19", 0x83 => "F20",
-        0x84 => "F21", 0x85 => "F22", 0x86 => "F23", 0x87 => "F24",
+        0x70 => "F1",
+        0x71 => "F2",
+        0x72 => "F3",
+        0x73 => "F4",
+        0x74 => "F5",
+        0x75 => "F6",
+        0x76 => "F7",
+        0x77 => "F8",
+        0x78 => "F9",
+        0x79 => "F10",
+        0x7A => "F11",
+        0x7B => "F12",
+        0x7C => "F13",
+        0x7D => "F14",
+        0x7E => "F15",
+        0x7F => "F16",
+        0x80 => "F17",
+        0x81 => "F18",
+        0x82 => "F19",
+        0x83 => "F20",
+        0x84 => "F21",
+        0x85 => "F22",
+        0x86 => "F23",
+        0x87 => "F24",
         0x20 => "Space",
         0x0D => "Enter",
         0x09 => "Tab",
@@ -82,9 +110,16 @@ fn vk_to_name(vk: u32) -> Option<String> {
         0x2C => "PrintScreen",
         0x13 => "Pause",
         0x91 => "ScrollLock",
-        0x60 => "Numpad0", 0x61 => "Numpad1", 0x62 => "Numpad2", 0x63 => "Numpad3",
-        0x64 => "Numpad4", 0x65 => "Numpad5", 0x66 => "Numpad6", 0x67 => "Numpad7",
-        0x68 => "Numpad8", 0x69 => "Numpad9",
+        0x60 => "Numpad0",
+        0x61 => "Numpad1",
+        0x62 => "Numpad2",
+        0x63 => "Numpad3",
+        0x64 => "Numpad4",
+        0x65 => "Numpad5",
+        0x66 => "Numpad6",
+        0x67 => "Numpad7",
+        0x68 => "Numpad8",
+        0x69 => "Numpad9",
         0x6B => "NumpadAdd",
         0x6D => "NumpadSubtract",
         0x6A => "NumpadMultiply",
@@ -98,22 +133,64 @@ fn vk_to_name(vk: u32) -> Option<String> {
 #[cfg(windows)]
 fn code_to_vk(c: Code) -> Option<u32> {
     let vk: u32 = match c {
-        Code::KeyA => 0x41, Code::KeyB => 0x42, Code::KeyC => 0x43, Code::KeyD => 0x44,
-        Code::KeyE => 0x45, Code::KeyF => 0x46, Code::KeyG => 0x47, Code::KeyH => 0x48,
-        Code::KeyI => 0x49, Code::KeyJ => 0x4A, Code::KeyK => 0x4B, Code::KeyL => 0x4C,
-        Code::KeyM => 0x4D, Code::KeyN => 0x4E, Code::KeyO => 0x4F, Code::KeyP => 0x50,
-        Code::KeyQ => 0x51, Code::KeyR => 0x52, Code::KeyS => 0x53, Code::KeyT => 0x54,
-        Code::KeyU => 0x55, Code::KeyV => 0x56, Code::KeyW => 0x57, Code::KeyX => 0x58,
-        Code::KeyY => 0x59, Code::KeyZ => 0x5A,
-        Code::Digit0 => 0x30, Code::Digit1 => 0x31, Code::Digit2 => 0x32, Code::Digit3 => 0x33,
-        Code::Digit4 => 0x34, Code::Digit5 => 0x35, Code::Digit6 => 0x36, Code::Digit7 => 0x37,
-        Code::Digit8 => 0x38, Code::Digit9 => 0x39,
-        Code::F1 => 0x70, Code::F2 => 0x71, Code::F3 => 0x72, Code::F4 => 0x73,
-        Code::F5 => 0x74, Code::F6 => 0x75, Code::F7 => 0x76, Code::F8 => 0x77,
-        Code::F9 => 0x78, Code::F10 => 0x79, Code::F11 => 0x7A, Code::F12 => 0x7B,
-        Code::F13 => 0x7C, Code::F14 => 0x7D, Code::F15 => 0x7E, Code::F16 => 0x7F,
-        Code::F17 => 0x80, Code::F18 => 0x81, Code::F19 => 0x82, Code::F20 => 0x83,
-        Code::F21 => 0x84, Code::F22 => 0x85,
+        Code::KeyA => 0x41,
+        Code::KeyB => 0x42,
+        Code::KeyC => 0x43,
+        Code::KeyD => 0x44,
+        Code::KeyE => 0x45,
+        Code::KeyF => 0x46,
+        Code::KeyG => 0x47,
+        Code::KeyH => 0x48,
+        Code::KeyI => 0x49,
+        Code::KeyJ => 0x4A,
+        Code::KeyK => 0x4B,
+        Code::KeyL => 0x4C,
+        Code::KeyM => 0x4D,
+        Code::KeyN => 0x4E,
+        Code::KeyO => 0x4F,
+        Code::KeyP => 0x50,
+        Code::KeyQ => 0x51,
+        Code::KeyR => 0x52,
+        Code::KeyS => 0x53,
+        Code::KeyT => 0x54,
+        Code::KeyU => 0x55,
+        Code::KeyV => 0x56,
+        Code::KeyW => 0x57,
+        Code::KeyX => 0x58,
+        Code::KeyY => 0x59,
+        Code::KeyZ => 0x5A,
+        Code::Digit0 => 0x30,
+        Code::Digit1 => 0x31,
+        Code::Digit2 => 0x32,
+        Code::Digit3 => 0x33,
+        Code::Digit4 => 0x34,
+        Code::Digit5 => 0x35,
+        Code::Digit6 => 0x36,
+        Code::Digit7 => 0x37,
+        Code::Digit8 => 0x38,
+        Code::Digit9 => 0x39,
+        Code::F1 => 0x70,
+        Code::F2 => 0x71,
+        Code::F3 => 0x72,
+        Code::F4 => 0x73,
+        Code::F5 => 0x74,
+        Code::F6 => 0x75,
+        Code::F7 => 0x76,
+        Code::F8 => 0x77,
+        Code::F9 => 0x78,
+        Code::F10 => 0x79,
+        Code::F11 => 0x7A,
+        Code::F12 => 0x7B,
+        Code::F13 => 0x7C,
+        Code::F14 => 0x7D,
+        Code::F15 => 0x7E,
+        Code::F16 => 0x7F,
+        Code::F17 => 0x80,
+        Code::F18 => 0x81,
+        Code::F19 => 0x82,
+        Code::F20 => 0x83,
+        Code::F21 => 0x84,
+        Code::F22 => 0x85,
         Code::F23 => 0x05, // vk_xbutton1 hijacked for mouse4
         Code::F24 => 0x06, // vk_xbutton2 hijacked for mouse5
         Code::Space => 0x20,
@@ -134,9 +211,16 @@ fn code_to_vk(c: Code) -> Option<u32> {
         Code::PrintScreen => 0x2C,
         Code::Pause => 0x13,
         Code::ScrollLock => 0x91,
-        Code::Numpad0 => 0x60, Code::Numpad1 => 0x61, Code::Numpad2 => 0x62, Code::Numpad3 => 0x63,
-        Code::Numpad4 => 0x64, Code::Numpad5 => 0x65, Code::Numpad6 => 0x66, Code::Numpad7 => 0x67,
-        Code::Numpad8 => 0x68, Code::Numpad9 => 0x69,
+        Code::Numpad0 => 0x60,
+        Code::Numpad1 => 0x61,
+        Code::Numpad2 => 0x62,
+        Code::Numpad3 => 0x63,
+        Code::Numpad4 => 0x64,
+        Code::Numpad5 => 0x65,
+        Code::Numpad6 => 0x66,
+        Code::Numpad7 => 0x67,
+        Code::Numpad8 => 0x68,
+        Code::Numpad9 => 0x69,
         Code::NumpadAdd => 0x6B,
         Code::NumpadSubtract => 0x6D,
         Code::NumpadMultiply => 0x6A,
@@ -256,16 +340,50 @@ pub fn is_risky_bare(s: &str) -> bool {
     }
     let safe = matches!(
         s,
-        "F1" | "F2" | "F3" | "F4" | "F5" | "F6" | "F7" | "F8"
-            | "F9" | "F10" | "F11" | "F12" | "F13" | "F14" | "F15"
-            | "F16" | "F17" | "F18" | "F19" | "F20" | "F21" | "F22"
-            | "F23" | "F24"
-            | "Mouse4" | "Mouse5"
-            | "Pause" | "PrintScreen" | "ScrollLock"
-            | "Numpad0" | "Numpad1" | "Numpad2" | "Numpad3" | "Numpad4"
-            | "Numpad5" | "Numpad6" | "Numpad7" | "Numpad8" | "Numpad9"
-            | "NumpadAdd" | "NumpadSubtract" | "NumpadMultiply"
-            | "NumpadDivide" | "NumpadDecimal" | "NumpadEnter"
+        "F1" | "F2"
+            | "F3"
+            | "F4"
+            | "F5"
+            | "F6"
+            | "F7"
+            | "F8"
+            | "F9"
+            | "F10"
+            | "F11"
+            | "F12"
+            | "F13"
+            | "F14"
+            | "F15"
+            | "F16"
+            | "F17"
+            | "F18"
+            | "F19"
+            | "F20"
+            | "F21"
+            | "F22"
+            | "F23"
+            | "F24"
+            | "Mouse4"
+            | "Mouse5"
+            | "Pause"
+            | "PrintScreen"
+            | "ScrollLock"
+            | "Numpad0"
+            | "Numpad1"
+            | "Numpad2"
+            | "Numpad3"
+            | "Numpad4"
+            | "Numpad5"
+            | "Numpad6"
+            | "Numpad7"
+            | "Numpad8"
+            | "Numpad9"
+            | "NumpadAdd"
+            | "NumpadSubtract"
+            | "NumpadMultiply"
+            | "NumpadDivide"
+            | "NumpadDecimal"
+            | "NumpadEnter"
     );
     !safe
 }
@@ -579,7 +697,10 @@ mod tests {
         // and must not trigger the startup-conflict notification.
         let mut hm = HotkeyManager::new().expect("manager");
         hm.try_register("task-no-key", "");
-        assert!(hm.take_errors().is_empty(), "empty hotkey must not produce an error");
+        assert!(
+            hm.take_errors().is_empty(),
+            "empty hotkey must not produce an error"
+        );
     }
 
     #[test]

@@ -17,8 +17,8 @@ use std::sync::{Mutex, OnceLock};
 use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, DispatchMessageW, GetMessageW, SetWindowsHookExW, TranslateMessage,
-    UnhookWindowsHookEx, HHOOK, KBDLLHOOKSTRUCT, MSLLHOOKSTRUCT, MSG, WH_KEYBOARD_LL,
-    WH_MOUSE_LL, WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP,
+    UnhookWindowsHookEx, HHOOK, KBDLLHOOKSTRUCT, MSG, MSLLHOOKSTRUCT, WH_KEYBOARD_LL, WH_MOUSE_LL,
+    WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP,
 };
 
 pub const MOD_CTRL: u8 = 1;
@@ -390,7 +390,7 @@ pub fn spawn_hook_thread() -> std::io::Result<()> {
                     return;
                 }
             };
-            
+
             // install mouse hook for mouse side button keybinds
             let mouse_hook: Option<HHOOK> = SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_hook_proc), hinstance, 0).ok();
             if mouse_hook.is_none() {
@@ -427,10 +427,10 @@ mod tests {
         assert_eq!(normalize_numpad_vk(0x26, false), 0x68); // UP -> NUMPAD8
         assert_eq!(normalize_numpad_vk(0x2D, false), 0x60); // INSERT -> NUMPAD0
         assert_eq!(normalize_numpad_vk(0x2E, false), 0x6E); // DELETE -> DECIMAL
-        // dedicated cursor cluster (extended bit set) → left alone
+                                                            // dedicated cursor cluster (extended bit set) → left alone
         assert_eq!(normalize_numpad_vk(0x24, true), 0x24); // HOME stays HOME
         assert_eq!(normalize_numpad_vk(0x26, true), 0x26); // UP stays UP
-        // unrelated vks pass through
+                                                           // unrelated vks pass through
         assert_eq!(normalize_numpad_vk(0x41, false), 0x41); // A
         assert_eq!(normalize_numpad_vk(0x2C, false), 0x2C); // PrintScreen
     }

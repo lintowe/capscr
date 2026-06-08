@@ -64,8 +64,8 @@ impl PluginManifest {
         let path = plugin_dir.join("plugin.toml");
         let raw = std::fs::read_to_string(&path)
             .map_err(|e| anyhow!("reading {}: {e}", path.display()))?;
-        let manifest: PluginManifest = toml::from_str(&raw)
-            .map_err(|e| anyhow!("parsing {}: {e}", path.display()))?;
+        let manifest: PluginManifest =
+            toml::from_str(&raw).map_err(|e| anyhow!("parsing {}: {e}", path.display()))?;
         manifest.validate()?;
         Ok(manifest)
     }
@@ -165,7 +165,10 @@ mod tests {
         let off: PluginManifest =
             toml::from_str("enabled=false\n[plugin]\nid=\"x\"\nname=\"X\"\nversion=\"1.0.0\"\n")
                 .unwrap();
-        assert!(!off.enabled, "top-level enabled=false must parse as disabled");
+        assert!(
+            !off.enabled,
+            "top-level enabled=false must parse as disabled"
+        );
     }
 
     #[test]

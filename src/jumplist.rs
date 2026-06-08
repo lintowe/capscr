@@ -90,13 +90,11 @@ pub fn register() -> windows::core::Result<()> {
         let collection: IObjectCollection =
             CoCreateInstance(&EnumerableObjectCollection, None, CLSCTX_INPROC_SERVER)?;
 
-        let exe = std::env::current_exe()
-            .map_err(|_| windows::core::Error::from_win32())?;
+        let exe = std::env::current_exe().map_err(|_| windows::core::Error::from_win32())?;
         let exe_wide = wide_path(&exe);
 
         for t in TASKS {
-            let link: IShellLinkW =
-                CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER)?;
+            let link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER)?;
             link.SetPath(PCWSTR(exe_wide.as_ptr()))?;
 
             let args = wide(t.arg);

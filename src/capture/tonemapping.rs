@@ -196,7 +196,6 @@ fn tonemap_pixel(r: f32, g: f32, b: f32, l_src: f32) -> (f32, f32, f32) {
     (r_desat * scale, g_desat * scale, b_desat * scale)
 }
 
-
 pub fn scrgb_to_sdr_bt2390(
     scrgb_rgba: &[f32],
     width: u32,
@@ -204,7 +203,8 @@ pub fn scrgb_to_sdr_bt2390(
     sdr_white_nits: f32,
     params: TonemapParams,
 ) -> RgbaImage {
-    if width == 0 || height == 0 || width > MAX_TONEMAP_DIMENSION || height > MAX_TONEMAP_DIMENSION {
+    if width == 0 || height == 0 || width > MAX_TONEMAP_DIMENSION || height > MAX_TONEMAP_DIMENSION
+    {
         return RgbaImage::new(1, 1);
     }
     let pixel_count = match (width as usize).checked_mul(height as usize) {
@@ -251,7 +251,12 @@ pub fn scrgb_to_sdr_bt2390(
 
     tracing::info!(
         "tonemap: {}x{} sdr_white={:.0}nits coeff={:.4} raw_peak={:.3} l_src={:.3}",
-        width, height, sdr_white, coeff, raw_peak, l_src,
+        width,
+        height,
+        sdr_white,
+        coeff,
+        raw_peak,
+        l_src,
     );
 
     // fused decode + tonemap + sRGB-encode in a single parallel pass.
@@ -277,10 +282,26 @@ pub fn scrgb_to_sdr_bt2390(
                     let b_raw = src_chunk[i * 4 + 2];
                     let a_raw = src_chunk[i * 4 + 3];
 
-                    let r = if r_raw.is_finite() { (r_raw * coeff).max(0.0) } else { 0.0 };
-                    let g = if g_raw.is_finite() { (g_raw * coeff).max(0.0) } else { 0.0 };
-                    let b = if b_raw.is_finite() { (b_raw * coeff).max(0.0) } else { 0.0 };
-                    let a = if a_raw.is_finite() { a_raw.clamp(0.0, 1.0) } else { 1.0 };
+                    let r = if r_raw.is_finite() {
+                        (r_raw * coeff).max(0.0)
+                    } else {
+                        0.0
+                    };
+                    let g = if g_raw.is_finite() {
+                        (g_raw * coeff).max(0.0)
+                    } else {
+                        0.0
+                    };
+                    let b = if b_raw.is_finite() {
+                        (b_raw * coeff).max(0.0)
+                    } else {
+                        0.0
+                    };
+                    let a = if a_raw.is_finite() {
+                        a_raw.clamp(0.0, 1.0)
+                    } else {
+                        1.0
+                    };
 
                     let (r_tm, g_tm, b_tm) = tonemap_pixel(r, g, b, l_src);
 
@@ -303,7 +324,8 @@ pub fn hdr10_to_sdr_bt2390(
     sdr_white_nits: f32,
     params: TonemapParams,
 ) -> RgbaImage {
-    if width == 0 || height == 0 || width > MAX_TONEMAP_DIMENSION || height > MAX_TONEMAP_DIMENSION {
+    if width == 0 || height == 0 || width > MAX_TONEMAP_DIMENSION || height > MAX_TONEMAP_DIMENSION
+    {
         return RgbaImage::new(1, 1);
     }
     let pixel_count = match (width as usize).checked_mul(height as usize) {
@@ -337,7 +359,8 @@ pub fn hlg_to_sdr_bt2390(
     sdr_white_nits: f32,
     params: TonemapParams,
 ) -> RgbaImage {
-    if width == 0 || height == 0 || width > MAX_TONEMAP_DIMENSION || height > MAX_TONEMAP_DIMENSION {
+    if width == 0 || height == 0 || width > MAX_TONEMAP_DIMENSION || height > MAX_TONEMAP_DIMENSION
+    {
         return RgbaImage::new(1, 1);
     }
     let pixel_count = match (width as usize).checked_mul(height as usize) {
@@ -371,7 +394,11 @@ fn effective_sdr_white(detected_nits: f32, override_nits: f32) -> f32 {
     // user's actual ~240 nits) and re-introduce HDR overblowing. only an
     // explicit override above 80 is treated as a real override now.
     let real_override = override_nits > 80.5;
-    let pick = if real_override { override_nits } else { detected_nits };
+    let pick = if real_override {
+        override_nits
+    } else {
+        detected_nits
+    };
     pick.max(80.0)
 }
 
@@ -399,7 +426,10 @@ mod tests {
         for nits in [10.0_f32, 100.0, 250.0, 1000.0, 4000.0, 10000.0] {
             let pq = pq_for(nits);
             let back = pq_to_linear_norm(pq) * 10000.0;
-            assert!((back - nits).abs() / nits < 0.01, "{nits} -> {pq} -> {back}");
+            assert!(
+                (back - nits).abs() / nits < 0.01,
+                "{nits} -> {pq} -> {back}"
+            );
         }
     }
 
@@ -410,11 +440,11 @@ mod tests {
         // normalization) passes through pixel-perfect below the knee.
         for (r, g, b) in [
             (0.0_f32, 0.0, 0.0),
-            (0.5, 0.5, 0.5),       // mid-grey
-            (0.8, 0.0, 0.0),       // SDR red below knee
-            (0.0, 0.8, 0.0),       // SDR green below knee
-            (0.0, 0.0, 0.8),       // SDR blue below knee
-            (0.8, 0.0, 0.8),       // SDR magenta below knee
+            (0.5, 0.5, 0.5), // mid-grey
+            (0.8, 0.0, 0.0), // SDR red below knee
+            (0.0, 0.8, 0.0), // SDR green below knee
+            (0.0, 0.0, 0.8), // SDR blue below knee
+            (0.8, 0.0, 0.8), // SDR magenta below knee
         ] {
             let (r2, g2, b2) = tonemap_pixel(r, g, b, 4.0);
             assert!((r2 - r).abs() < 1e-5, "r {r} -> {r2}");
@@ -450,8 +480,14 @@ mod tests {
         // bright WHITE compresses similarly
         let (sdr_white_r, _, _) = tonemap_pixel(1.0, 1.0, 1.0, 6.0);
         let (hdr_white_r, _, _) = tonemap_pixel(4.0, 4.0, 4.0, 6.0);
-        assert!((sdr_white_r - 0.90273).abs() < 1e-4, "SDR white must be 0.90273: {sdr_white_r}");
-        assert!((hdr_white_r - 0.98589).abs() < 1e-4, "HDR white must compress to 0.98589: {hdr_white_r}");
+        assert!(
+            (sdr_white_r - 0.90273).abs() < 1e-4,
+            "SDR white must be 0.90273: {sdr_white_r}"
+        );
+        assert!(
+            (hdr_white_r - 0.98589).abs() < 1e-4,
+            "HDR white must compress to 0.98589: {hdr_white_r}"
+        );
     }
 
     #[test]
@@ -463,7 +499,10 @@ mod tests {
         let scrgb = solid(2, 2, sdr_white / 80.0, sdr_white / 80.0, sdr_white / 80.0);
         let img = scrgb_to_sdr_bt2390(&scrgb, 2, 2, sdr_white, TonemapParams::default());
         let p = img.get_pixel(0, 0);
-        assert!(p[0] >= 245 && p[1] >= 245 && p[2] >= 245, "SDR white: {p:?}");
+        assert!(
+            p[0] >= 245 && p[1] >= 245 && p[2] >= 245,
+            "SDR white: {p:?}"
+        );
     }
 
     #[test]
@@ -505,7 +544,11 @@ mod tests {
         let img = scrgb_to_sdr_bt2390(&data, 10, 10, 80.0, TonemapParams::default());
         // outlier pixel: should be bright but not necessarily 255
         let hi = img.get_pixel(9, 9);
-        assert!(hi[0] >= 200, "outlier highlight should stay bright: {}", hi[0]);
+        assert!(
+            hi[0] >= 200,
+            "outlier highlight should stay bright: {}",
+            hi[0]
+        );
         // mid-grey: should be unaffected (well below knee)
         let lo = img.get_pixel(0, 0);
         assert!(lo[0] > 100 && lo[0] < 220, "mid-grey moved: {}", lo[0]);
@@ -559,7 +602,10 @@ mod tests {
         // detected 80, override 250: a pixel at scRGB 250/80 should land at
         // sRGB ~246 because the override (not the detected value) drives
         // the normalization.
-        let params = TonemapParams { sdr_white_nits_override: 250.0, ..TonemapParams::default() };
+        let params = TonemapParams {
+            sdr_white_nits_override: 250.0,
+            ..TonemapParams::default()
+        };
         let scrgb = solid(2, 2, 250.0 / 80.0, 250.0 / 80.0, 250.0 / 80.0);
         let img = scrgb_to_sdr_bt2390(&scrgb, 2, 2, 80.0, params);
         let p = img.get_pixel(0, 0);

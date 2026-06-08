@@ -18,8 +18,8 @@ mod upload;
 #[cfg(windows)]
 mod win_darkmode;
 
-use std::time::Duration;
 use crossbeam_channel as cb;
+use std::time::Duration;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager};
@@ -64,10 +64,9 @@ fn main() {
     #[cfg(windows)]
     win_darkmode::enable_dark_menus();
     tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new("info,wry=warn,tao=warn,tauri=warn,hyper=warn,reqwest=warn")),
-        )
+        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+            EnvFilter::new("info,wry=warn,tao=warn,tauri=warn,hyper=warn,reqwest=warn")
+        }))
         .init();
 
     let config = config::Config::load().unwrap_or_default();
@@ -129,12 +128,14 @@ fn main() {
             None,
         ))
         // exclude VISIBLE — we manage hub visibility manually via prewarm + tray-click
-        .plugin(tauri_plugin_window_state::Builder::default()
-            .with_state_flags(
-                tauri_plugin_window_state::StateFlags::all()
-                    & !tauri_plugin_window_state::StateFlags::VISIBLE
-            )
-            .build())
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(
+                    tauri_plugin_window_state::StateFlags::all()
+                        & !tauri_plugin_window_state::StateFlags::VISIBLE,
+                )
+                .build(),
+        )
         .manage(app_state)
         .setup(move |app| {
             // load plugins on a background thread so the cranelift JIT compile
@@ -277,20 +278,26 @@ fn sync_autostart(app: &tauri::App, desired: bool) {
 // build the full tray menu fresh from current AppState. Called once at
 // startup and again any time the state surfaces in the menu changes —
 // new upload, destination switched, hotkeys toggled.
-fn build_tray_menu<R: tauri::Runtime, M: tauri::Manager<R>>(
-    app: &M,
-) -> tauri::Result<Menu<R>> {
+fn build_tray_menu<R: tauri::Runtime, M: tauri::Manager<R>>(app: &M) -> tauri::Result<Menu<R>> {
     use std::sync::atomic::Ordering;
 
     // --- Capture submenu ---
-    let cap_region =
-        MenuItem::with_id(app, "cap_region", "Region", true, None::<&str>)?;
-    let cap_window =
-        MenuItem::with_id(app, "cap_window", "Window", true, None::<&str>)?;
-    let cap_fullscreen =
-        MenuItem::with_id(app, "cap_fullscreen", "Fullscreen (selector)", true, None::<&str>)?;
-    let cap_active =
-        MenuItem::with_id(app, "cap_active_monitor", "Active monitor", true, None::<&str>)?;
+    let cap_region = MenuItem::with_id(app, "cap_region", "Region", true, None::<&str>)?;
+    let cap_window = MenuItem::with_id(app, "cap_window", "Window", true, None::<&str>)?;
+    let cap_fullscreen = MenuItem::with_id(
+        app,
+        "cap_fullscreen",
+        "Fullscreen (selector)",
+        true,
+        None::<&str>,
+    )?;
+    let cap_active = MenuItem::with_id(
+        app,
+        "cap_active_monitor",
+        "Active monitor",
+        true,
+        None::<&str>,
+    )?;
     let capture_submenu = Submenu::with_items(
         app,
         "Capture",
@@ -400,7 +407,10 @@ fn build_tray_menu<R: tauri::Runtime, M: tauri::Manager<R>>(
     let dest_custom = MenuItem::with_id(
         app,
         "dest_custom",
-        mark(current_dest == config::UploadDestination::Custom, "Custom HTTPS"),
+        mark(
+            current_dest == config::UploadDestination::Custom,
+            "Custom HTTPS",
+        ),
         true,
         None::<&str>,
     )?;

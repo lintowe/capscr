@@ -45,8 +45,7 @@ impl ScreenCapture {
         {
             if let Ok(monitors) = super::fast_list_monitors() {
                 if let Some(m) = monitors.into_iter().find(|m| {
-                    x >= m.x && x < m.x + m.width as i32 &&
-                    y >= m.y && y < m.y + m.height as i32
+                    x >= m.x && x < m.x + m.width as i32 && y >= m.y && y < m.y + m.height as i32
                 }) {
                     return Ok(Self {
                         monitor_id: Some(m.id),
@@ -68,15 +67,18 @@ impl ScreenCapture {
         #[cfg(not(windows))]
         let monitors = {
             let screens = Monitor::all()?;
-            screens.into_iter().map(|s| super::MonitorInfo {
-                id: s.id(),
-                name: s.name().to_string(),
-                x: s.x(),
-                y: s.y(),
-                width: s.width(),
-                height: s.height(),
-                is_primary: s.is_primary(),
-            }).collect::<Vec<_>>()
+            screens
+                .into_iter()
+                .map(|s| super::MonitorInfo {
+                    id: s.id(),
+                    name: s.name().to_string(),
+                    x: s.x(),
+                    y: s.y(),
+                    width: s.width(),
+                    height: s.height(),
+                    is_primary: s.is_primary(),
+                })
+                .collect::<Vec<_>>()
         };
 
         if monitors.is_empty() {
@@ -129,7 +131,10 @@ impl ScreenCapture {
                             })
                         })
                         .collect();
-                    handles.into_iter().map(|h| h.join().unwrap_or(None)).collect()
+                    handles
+                        .into_iter()
+                        .map(|h| h.join().unwrap_or(None))
+                        .collect()
                 })
             } else {
                 vec![super::capture_one_monitor(&monitors[0]).ok()]
@@ -139,7 +144,10 @@ impl ScreenCapture {
                 let Some(img) = img else {
                     tracing::warn!(
                         "capture_one_monitor failed for {}x{}+{}+{}",
-                        monitor.width, monitor.height, monitor.x, monitor.y,
+                        monitor.width,
+                        monitor.height,
+                        monitor.x,
+                        monitor.y,
                     );
                     continue;
                 };
@@ -148,9 +156,7 @@ impl ScreenCapture {
                 if offset_x_i32 < 0 || offset_y_i32 < 0 {
                     continue;
                 }
-                if let Err(e) =
-                    combined.copy_from(&img, offset_x_i32 as u32, offset_y_i32 as u32)
-                {
+                if let Err(e) = combined.copy_from(&img, offset_x_i32 as u32, offset_y_i32 as u32) {
                     tracing::warn!("Failed to copy monitor image into combined buffer: {e}");
                 }
             }
@@ -165,7 +171,11 @@ impl ScreenCapture {
             };
             let img = match screen.capture_image() {
                 Ok(i) => super::orient_captured_image(
-                    i, monitor.width, monitor.height, monitor.x, monitor.y,
+                    i,
+                    monitor.width,
+                    monitor.height,
+                    monitor.x,
+                    monitor.y,
                 ),
                 Err(_) => continue,
             };
@@ -204,7 +214,10 @@ impl ScreenCapture {
             if let Ok(monitors) = super::fast_list_monitors() {
                 let info = match self.monitor_id {
                     Some(id) => monitors.into_iter().find(|m| m.id == id),
-                    None => monitors.into_iter().find(|m| m.is_primary).or_else(|| super::fast_list_monitors().ok()?.into_iter().next()),
+                    None => monitors
+                        .into_iter()
+                        .find(|m| m.is_primary)
+                        .or_else(|| super::fast_list_monitors().ok()?.into_iter().next()),
                 };
                 if let Some(m) = info {
                     return Ok(m);

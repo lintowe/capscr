@@ -48,23 +48,29 @@ impl Capture for RegionCapture {
     fn capture(&self) -> Result<RgbaImage> {
         tracing::info!(
             "RegionCapture::capture entry: region={}x{}+{}+{}",
-            self.region.width, self.region.height, self.region.x, self.region.y
+            self.region.width,
+            self.region.height,
+            self.region.x,
+            self.region.y
         );
-        
+
         #[cfg(windows)]
         let monitors = super::fast_list_monitors()?;
         #[cfg(not(windows))]
         let monitors = {
             let screens = Monitor::all()?;
-            screens.into_iter().map(|s| super::MonitorInfo {
-                id: s.id(),
-                name: s.name().to_string(),
-                x: s.x(),
-                y: s.y(),
-                width: s.width(),
-                height: s.height(),
-                is_primary: s.is_primary(),
-            }).collect::<Vec<_>>()
+            screens
+                .into_iter()
+                .map(|s| super::MonitorInfo {
+                    id: s.id(),
+                    name: s.name().to_string(),
+                    x: s.x(),
+                    y: s.y(),
+                    width: s.width(),
+                    height: s.height(),
+                    is_primary: s.is_primary(),
+                })
+                .collect::<Vec<_>>()
         };
 
         if monitors.is_empty() {
@@ -73,8 +79,16 @@ impl Capture for RegionCapture {
 
         let min_x = monitors.iter().map(|m| m.x).min().unwrap_or(0);
         let min_y = monitors.iter().map(|m| m.y).min().unwrap_or(0);
-        let max_x = monitors.iter().map(|m| m.x + m.width as i32).max().unwrap_or(0);
-        let max_y = monitors.iter().map(|m| m.y + m.height as i32).max().unwrap_or(0);
+        let max_x = monitors
+            .iter()
+            .map(|m| m.x + m.width as i32)
+            .max()
+            .unwrap_or(0);
+        let max_y = monitors
+            .iter()
+            .map(|m| m.y + m.height as i32)
+            .max()
+            .unwrap_or(0);
 
         let total_width = (max_x - min_x) as u32;
         let total_height = (max_y - min_y) as u32;
@@ -101,12 +115,14 @@ impl Capture for RegionCapture {
             let my0 = monitor.y;
             let mx1 = mx0 + monitor.width as i32;
             let my1 = my0 + monitor.height as i32;
-            let overlaps = mx0 < region_x1 && mx1 > region_x0
-                && my0 < region_y1 && my1 > region_y0;
+            let overlaps = mx0 < region_x1 && mx1 > region_x0 && my0 < region_y1 && my1 > region_y0;
             if !overlaps {
                 tracing::info!(
                     "RegionCapture: skipping non-overlapping monitor {}x{}+{}+{}",
-                    monitor.width, monitor.height, mx0, my0,
+                    monitor.width,
+                    monitor.height,
+                    mx0,
+                    my0,
                 );
                 continue;
             }
@@ -117,7 +133,10 @@ impl Capture for RegionCapture {
                 Err(e) => {
                     tracing::warn!(
                         "RegionCapture: capture_one_monitor failed for {}x{}+{}+{}: {e:#}",
-                        monitor.width, monitor.height, monitor.x, monitor.y,
+                        monitor.width,
+                        monitor.height,
+                        monitor.x,
+                        monitor.y,
                     );
                     continue;
                 }
@@ -131,7 +150,11 @@ impl Capture for RegionCapture {
                 };
                 match screen.capture_image() {
                     Ok(i) => super::orient_captured_image(
-                        i, monitor.width, monitor.height, monitor.x, monitor.y,
+                        i,
+                        monitor.width,
+                        monitor.height,
+                        monitor.x,
+                        monitor.y,
                     ),
                     Err(_) => continue,
                 }
@@ -154,7 +177,8 @@ impl Capture for RegionCapture {
             return Err(anyhow!("Invalid region dimensions"));
         }
 
-        let cropped = image::imageops::crop_imm(&combined, img_x, img_y, crop_width, crop_height).to_image();
+        let cropped =
+            image::imageops::crop_imm(&combined, img_x, img_y, crop_width, crop_height).to_image();
         Ok(cropped)
     }
 }

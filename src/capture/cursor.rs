@@ -72,8 +72,8 @@ mod windows_impl {
         SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HBITMAP, HDC,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
-        CopyIcon, DestroyIcon, DrawIconEx, GetCursorInfo, GetIconInfo, CURSORINFO,
-        CURSOR_SHOWING, DI_NORMAL, ICONINFO,
+        CopyIcon, DestroyIcon, DrawIconEx, GetCursorInfo, GetIconInfo, CURSORINFO, CURSOR_SHOWING,
+        DI_NORMAL, ICONINFO,
     };
 
     pub fn fetch_cursor() -> Option<(RgbaImage, i32, i32)> {
@@ -99,7 +99,9 @@ mod windows_impl {
             struct IconGuard(windows::Win32::UI::WindowsAndMessaging::HICON);
             impl Drop for IconGuard {
                 fn drop(&mut self) {
-                    unsafe { let _ = DestroyIcon(self.0); }
+                    unsafe {
+                        let _ = DestroyIcon(self.0);
+                    }
                 }
             }
             let _icon_guard = IconGuard(hicon);
@@ -113,7 +115,9 @@ mod windows_impl {
             impl Drop for BmpGuard {
                 fn drop(&mut self) {
                     if !self.0.is_invalid() {
-                        unsafe { let _ = DeleteObject(self.0); }
+                        unsafe {
+                            let _ = DeleteObject(self.0);
+                        }
                     }
                 }
             }
@@ -163,7 +167,9 @@ mod windows_impl {
             struct DcGuard(HDC);
             impl Drop for DcGuard {
                 fn drop(&mut self) {
-                    unsafe { ReleaseDC(HWND::default(), self.0); }
+                    unsafe {
+                        ReleaseDC(HWND::default(), self.0);
+                    }
                 }
             }
             let _screen_guard = DcGuard(screen_dc);
@@ -175,7 +181,9 @@ mod windows_impl {
             struct MemDcGuard(HDC);
             impl Drop for MemDcGuard {
                 fn drop(&mut self) {
-                    unsafe { let _ = DeleteDC(self.0); }
+                    unsafe {
+                        let _ = DeleteDC(self.0);
+                    }
                 }
             }
             let _mem_guard = MemDcGuard(mem_dc);
@@ -190,15 +198,8 @@ mod windows_impl {
             bmi.bmiHeader.biCompression = BI_RGB.0;
 
             let mut pixels_ptr: *mut std::ffi::c_void = std::ptr::null_mut();
-            let dib = CreateDIBSection(
-                mem_dc,
-                &bmi,
-                DIB_RGB_COLORS,
-                &mut pixels_ptr,
-                None,
-                0,
-            )
-            .ok()?;
+            let dib =
+                CreateDIBSection(mem_dc, &bmi, DIB_RGB_COLORS, &mut pixels_ptr, None, 0).ok()?;
             let _dib_guard = BmpGuard(dib);
             if pixels_ptr.is_null() {
                 return None;

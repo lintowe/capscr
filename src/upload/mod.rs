@@ -99,11 +99,17 @@ impl ImageUploader {
                 if let Some(host) = url.host_str() {
                     let h = host.to_lowercase();
                     let blocked = [
-                        "localhost", "127.0.0.1", "0.0.0.0",
-                        "metadata.google.internal", "metadata.google.com",
+                        "localhost",
+                        "127.0.0.1",
+                        "0.0.0.0",
+                        "metadata.google.internal",
+                        "metadata.google.com",
                         "instance-data",
                     ];
-                    if blocked.iter().any(|b| h == *b || h.ends_with(&format!(".{b}"))) {
+                    if blocked
+                        .iter()
+                        .any(|b| h == *b || h.ends_with(&format!(".{b}")))
+                    {
                         return attempt.error("redirect to blocked host");
                     }
                     if h.starts_with("169.254.") {
@@ -139,9 +145,13 @@ impl ImageUploader {
                 }
                 let o = ipv6.octets();
                 // ULA: fc00::/7
-                if o[0] & 0xFE == 0xFC { return true; }
+                if o[0] & 0xFE == 0xFC {
+                    return true;
+                }
                 // link-local: fe80::/10
-                if o[0] == 0xFE && (o[1] & 0xC0) == 0x80 { return true; }
+                if o[0] == 0xFE && (o[1] & 0xC0) == 0x80 {
+                    return true;
+                }
                 // IPv4-mapped: ::ffff:0:0/96 — check the embedded IPv4
                 if o[..10] == [0u8; 10] && o[10] == 0xFF && o[11] == 0xFF {
                     let v4 = IpAddr::V4(Ipv4Addr::new(o[12], o[13], o[14], o[15]));
@@ -315,15 +325,11 @@ impl ImageUploader {
         let mut last_err: Option<anyhow::Error> = None;
         for attempt in 0..attempts {
             let result = match service {
-                UploadService::Imgur => {
-                    self.upload_imgur(data, mime, file_name, "546c25a59c58ad7")
-                }
+                UploadService::Imgur => self.upload_imgur(data, mime, file_name, "546c25a59c58ad7"),
                 UploadService::ImgurWithClientId(cid) => {
                     self.upload_imgur(data, mime, file_name, cid)
                 }
-                UploadService::Custom(config) => {
-                    self.upload_custom(data, mime, file_name, config)
-                }
+                UploadService::Custom(config) => self.upload_custom(data, mime, file_name, config),
                 UploadService::Ftp(target) => upload_ftp(data, file_name, target),
                 UploadService::Sftp(target) => upload_sftp(data, file_name, target),
             };
@@ -590,7 +596,9 @@ fn build_url(template: &str, filename: &str) -> Result<String> {
         ));
     }
     if !template.starts_with("https://") && !template.starts_with("http://") {
-        return Err(anyhow!("public_url_template must start with https:// or http://"));
+        return Err(anyhow!(
+            "public_url_template must start with https:// or http://"
+        ));
     }
     let url = template.replace("{filename}", filename);
     if url.len() > MAX_URL_LEN {
@@ -616,7 +624,10 @@ fn validate_host(host: &str) -> Result<()> {
     if host.len() > 253 {
         return Err(anyhow!("host too long"));
     }
-    if !host.chars().all(|c| c.is_alphanumeric() || c == '.' || c == '-' || c == ':') {
+    if !host
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '.' || c == '-' || c == ':')
+    {
         return Err(anyhow!("host contains invalid characters"));
     }
     Ok(())
@@ -859,7 +870,10 @@ pub fn test_connection_sftp(target: &SftpTarget) -> Result<Vec<TestStep>> {
         }
     }
 
-    let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+    let runtime = match tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
         Ok(r) => r,
         Err(e) => {
             steps.push(TestStep::fail("runtime", e.to_string()));
@@ -886,10 +900,8 @@ pub fn test_connection_sftp(target: &SftpTarget) -> Result<Vec<TestStep>> {
         if !key_path.is_empty() {
             match load_private_key(&key_path, &key_pass) {
                 Ok(pk) => {
-                    let pkwha = russh::keys::key::PrivateKeyWithHashAlg::new(
-                        std::sync::Arc::new(pk),
-                        None,
-                    );
+                    let pkwha =
+                        russh::keys::key::PrivateKeyWithHashAlg::new(std::sync::Arc::new(pk), None);
                     match session.authenticate_publickey(&username, pkwha).await {
                         Ok(r) if r.success() => {
                             steps.push(TestStep::ok("auth-publickey", key_path.clone()));
@@ -935,7 +947,11 @@ pub fn test_connection_sftp(target: &SftpTarget) -> Result<Vec<TestStep>> {
             .map_err(|e| format!("sftp session: {e}"))?;
         steps.push(TestStep::ok("sftp-subsystem", "opened".into()));
 
-        let probe_path = if remote_dir.is_empty() { "." } else { remote_dir.as_str() };
+        let probe_path = if remote_dir.is_empty() {
+            "."
+        } else {
+            remote_dir.as_str()
+        };
         match sftp.read_dir(probe_path).await {
             Ok(_) => {
                 steps.push(TestStep::ok(
@@ -952,9 +968,7 @@ pub fn test_connection_sftp(target: &SftpTarget) -> Result<Vec<TestStep>> {
     if let Some(msg) = mismatch_error.lock().unwrap().take() {
         return Ok(vec![TestStep::fail(
             "host-key-mismatch",
-            format!(
-                "{msg} — forget the host in Settings → SSH known hosts and reconnect"
-            ),
+            format!("{msg} — forget the host in Settings → SSH known hosts and reconnect"),
         )]);
     }
 
@@ -1044,7 +1058,11 @@ pub fn test_connection_imgur(client_id: &str) -> Result<Vec<TestStep>> {
     } else {
         steps.push(TestStep::fail(
             "api-credits",
-            format!("HTTP {} — {}", status, body.chars().take(200).collect::<String>()),
+            format!(
+                "HTTP {} — {}",
+                status,
+                body.chars().take(200).collect::<String>()
+            ),
         ));
     }
     Ok(steps)
@@ -1118,7 +1136,11 @@ pub fn test_connection_custom(uploader: &CustomUploader) -> Result<Vec<TestStep>
         let body = resp.text().unwrap_or_default();
         steps.push(TestStep::fail(
             "options-request",
-            format!("HTTP {} — {}", status, body.chars().take(200).collect::<String>()),
+            format!(
+                "HTTP {} — {}",
+                status,
+                body.chars().take(200).collect::<String>()
+            ),
         ));
     }
     Ok(steps)
@@ -1132,7 +1154,9 @@ pub fn upload_ftp(data: &[u8], file_name: &str, target: &FtpTarget) -> Result<Up
     validate_remote_dir(&target.remote_dir)?;
     validate_resolved_host(&target.host, target.port.max(1))?;
     if target.use_tls {
-        return Err(anyhow!("FTPS not yet implemented; disable use_tls or use SFTP"));
+        return Err(anyhow!(
+            "FTPS not yet implemented; disable use_tls or use SFTP"
+        ));
     }
 
     // sanitize and uniquify the remote filename so callers can't smuggle path
@@ -1168,11 +1192,7 @@ pub fn upload_ftp(data: &[u8], file_name: &str, target: &FtpTarget) -> Result<Up
     };
 
     if let Err(e) = stream.login(&target.username, &target.password) {
-        return with_cleanup(
-            Err(anyhow!("FTP login failed: {}", e)),
-            stream,
-            None,
-        );
+        return with_cleanup(Err(anyhow!("FTP login failed: {}", e)), stream, None);
     }
 
     if !target.remote_dir.is_empty() {
@@ -1279,11 +1299,7 @@ pub fn upload_sftp(data: &[u8], file_name: &str, target: &SftpTarget) -> Result<
                     if let Err(e) = store.save(&self.known_hosts_path) {
                         tracing::warn!("ssh_known_hosts save failed: {e}");
                     }
-                    tracing::info!(
-                        "ssh host trust-on-first-use: {} -> {}",
-                        self.host_port,
-                        fp
-                    );
+                    tracing::info!("ssh host trust-on-first-use: {} -> {}", self.host_port, fp);
                     Ok(true)
                 }
             }
@@ -1322,10 +1338,8 @@ pub fn upload_sftp(data: &[u8], file_name: &str, target: &SftpTarget) -> Result<
         if !key_path.is_empty() {
             match load_private_key(&key_path, &key_pass) {
                 Ok(pk) => {
-                    let pkwha = russh::keys::key::PrivateKeyWithHashAlg::new(
-                        std::sync::Arc::new(pk),
-                        None,
-                    );
+                    let pkwha =
+                        russh::keys::key::PrivateKeyWithHashAlg::new(std::sync::Arc::new(pk), None);
                     match session.authenticate_publickey(&username, pkwha).await {
                         Ok(r) if r.success() => auth_ok = true,
                         Ok(_) => auth_diag.push(
@@ -1404,7 +1418,10 @@ pub fn upload_sftp(data: &[u8], file_name: &str, target: &SftpTarget) -> Result<
     connect_result?;
 
     let url = build_url(&url_template, &filename)?;
-    Ok(UploadResult { url, delete_url: None })
+    Ok(UploadResult {
+        url,
+        delete_url: None,
+    })
 }
 
 #[cfg(not(feature = "sftp"))]
@@ -1415,10 +1432,7 @@ pub fn upload_sftp(_data: &[u8], _file_name: &str, _target: &SftpTarget) -> Resu
 }
 
 #[cfg(feature = "sftp")]
-fn load_private_key(
-    path: &str,
-    passphrase: &str,
-) -> Result<russh::keys::ssh_key::PrivateKey> {
+fn load_private_key(path: &str, passphrase: &str) -> Result<russh::keys::ssh_key::PrivateKey> {
     use russh::keys::ssh_key::PrivateKey;
 
     let path_buf = std::path::PathBuf::from(path);
@@ -1469,10 +1483,7 @@ fn uniquify_remote_filename(name: &str) -> String {
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("upload");
-    let ext = path
-        .extension()
-        .and_then(|s| s.to_str())
-        .unwrap_or("bin");
+    let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("bin");
     let now = chrono::Local::now().format("%Y%m%d_%H%M%S").to_string();
     let id = &uuid::Uuid::new_v4().as_simple().to_string()[..8];
     format!("{}_{}_{}.{}", stem, now, id, ext)
@@ -1485,7 +1496,9 @@ mod tests {
     #[test]
     fn transient_classifier_retries_network_failures() {
         assert!(is_transient_upload_error(&anyhow!("operation timed out")));
-        assert!(is_transient_upload_error(&anyhow!("connection reset by peer")));
+        assert!(is_transient_upload_error(&anyhow!(
+            "connection reset by peer"
+        )));
         assert!(is_transient_upload_error(&anyhow!("status code: 503")));
         assert!(is_transient_upload_error(&anyhow!("tls handshake failed")));
     }
@@ -1493,8 +1506,12 @@ mod tests {
     #[test]
     fn transient_classifier_skips_real_failures() {
         assert!(!is_transient_upload_error(&anyhow!("401 unauthorized")));
-        assert!(!is_transient_upload_error(&anyhow!("imgur error: Image too big")));
-        assert!(!is_transient_upload_error(&anyhow!("invalid JSON in response")));
+        assert!(!is_transient_upload_error(&anyhow!(
+            "imgur error: Image too big"
+        )));
+        assert!(!is_transient_upload_error(&anyhow!(
+            "invalid JSON in response"
+        )));
     }
 
     #[test]
@@ -1537,9 +1554,7 @@ mod tests {
         let err = validate_resolved_host("127.0.0.1", 21).unwrap_err();
         let msg = err.to_string();
         assert!(
-            msg.contains("Private")
-                || msg.contains("Host not allowed")
-                || msg.contains("private"),
+            msg.contains("Private") || msg.contains("Host not allowed") || msg.contains("private"),
             "expected loopback rejection, got: {msg}"
         );
     }

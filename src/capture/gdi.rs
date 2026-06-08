@@ -1,11 +1,11 @@
 use anyhow::{anyhow, Result};
 use image::RgbaImage;
-use windows::Win32::Graphics::Gdi::{
-    GetDC, CreateCompatibleDC, CreateDIBSection, SelectObject, BitBlt,
-    GdiFlush, DeleteDC, DeleteObject, ReleaseDC, DIB_RGB_COLORS,
-    BITMAPINFO, BITMAPINFOHEADER, BI_RGB, SRCCOPY, CAPTUREBLT, HBITMAP,
-};
 use windows::Win32::Foundation::HWND;
+use windows::Win32::Graphics::Gdi::{
+    BitBlt, CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, GdiFlush, GetDC,
+    ReleaseDC, SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, CAPTUREBLT, DIB_RGB_COLORS,
+    HBITMAP, SRCCOPY,
+};
 
 // returns the DIB section bitmap together with the pointer to its pixel bits,
 // so the caller can read the blitted pixels directly (after a GdiFlush) instead
@@ -98,11 +98,11 @@ pub fn fast_gdi_capture(x: i32, y: i32, width: u32, height: u32) -> Result<RgbaI
     }
 }
 
-use windows::Win32::Graphics::Gdi::{
-    EnumDisplayMonitors, GetMonitorInfoW, HMONITOR, HDC, MONITORINFOEXW,
-};
-use windows::Win32::Foundation::{BOOL, LPARAM, RECT};
 use super::MonitorInfo;
+use windows::Win32::Foundation::{BOOL, LPARAM, RECT};
+use windows::Win32::Graphics::Gdi::{
+    EnumDisplayMonitors, GetMonitorInfoW, HDC, HMONITOR, MONITORINFOEXW,
+};
 
 struct MonitorEnumState {
     monitors: Vec<MonitorInfo>,
@@ -147,7 +147,7 @@ unsafe extern "system" fn monitor_enum_proc(
     if ok.as_bool() {
         let r = info.monitorInfo.rcMonitor;
         let is_primary = (info.monitorInfo.dwFlags & 1) != 0; // MONITORINFOF_PRIMARY = 1
-        
+
         let name_len = info.szDevice.iter().position(|&c| c == 0).unwrap_or(32);
         let name = String::from_utf16_lossy(&info.szDevice[..name_len]);
 
@@ -165,4 +165,3 @@ unsafe extern "system" fn monitor_enum_proc(
 
     BOOL(1)
 }
-

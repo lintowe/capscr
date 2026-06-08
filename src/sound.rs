@@ -38,17 +38,15 @@ pub fn warm_audio_subsystem() {
 mod engine {
     use super::Sound;
     use std::sync::{Mutex, OnceLock};
-    use windows::Win32::Media::Audio::{
-        AudioCategory_SoundEffects, WAVEFORMATEX, WAVE_FORMAT_PCM,
-    };
+    use windows::Win32::Foundation::{RPC_E_CHANGED_MODE, S_FALSE};
     use windows::Win32::Media::Audio::XAudio2::{
         IXAudio2, IXAudio2MasteringVoice, IXAudio2SourceVoice, IXAudio2VoiceCallback,
         XAudio2CreateWithVersionInfo, XAUDIO2_BUFFER, XAUDIO2_COMMIT_NOW,
         XAUDIO2_DEFAULT_PROCESSOR, XAUDIO2_END_OF_STREAM, XAUDIO2_LOOP_INFINITE,
         XAUDIO2_VOICE_STATE,
     };
+    use windows::Win32::Media::Audio::{AudioCategory_SoundEffects, WAVEFORMATEX, WAVE_FORMAT_PCM};
     use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED};
-    use windows::Win32::Foundation::{RPC_E_CHANGED_MODE, S_FALSE};
 
     // NTDDI_WIN8 = 0x06020000 — XAudio2 ships in Windows 8+, and the
     // 2.8 DLL (xaudio2_8.dll) is the one bound by the windows crate.
@@ -153,9 +151,7 @@ mod engine {
             || fmt.nSamplesPerSec != fmt2.nSamplesPerSec
             || fmt.wBitsPerSample != fmt2.wBitsPerSample
         {
-            tracing::warn!(
-                "screenshot.wav and upload.wav formats diverge — sound engine disabled"
-            );
+            tracing::warn!("screenshot.wav and upload.wav formats diverge — sound engine disabled");
             return None;
         }
 
