@@ -1,0 +1,1096 @@
+import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import { api } from "../api";
+import {
+  ArrowRight,
+  Square,
+  Type,
+  Droplet,
+  RotateCcw,
+  RotateCw,
+  Save,
+  Copy,
+  Upload,
+  X,
+  ZoomIn,
+  ZoomOut,
+  Maximize2,
+  Circle,
+  Minus,
+  CircleDashed,
+  Highlighter,
+} from "lucide-solid";
+import { Titlebar } from "../components/Titlebar";
+
+type Tool =
+  | "arrow"
+  | "rect"
+  | "text"
+  | "blur"
+  | "step"
+  | "line"
+  | "ellipse"
+  | "highlight";
+
+interface Point {
+  x: number;
+  y: number;
+}
+
+interface ArrowOp {
+  kind: "arrow";
+  from: Point;
+  to: Point;
+  color: string;
+  width: number;
+}
+
+interface RectOp {
+  kind: "rect";
+  origin: Point;
+  size: { w: number; h: number };
+  color: string;
+  width: number;
+}
+
+interface TextOp {
+  kind: "text";
+  origin: Point;
+  text: string;
+  color: string;
+  fontSize: number;
+}
+
+interface BlurOp {
+  kind: "blur";
+  origin: Point;
+  size: { w: number; h: number };
+  radius: number;
+}
+
+interface StepOp {
+  kind: "step";
+  center: Point;
+  number: number;
+  color: string;
+  radius: number;
+}
+
+interface LineOp {
+  kind: "line";
+  from: Point;
+  to: Point;
+  color: string;
+  width: number;
+}
+
+interface EllipseOp {
+  kind: "ellipse";
+  origin: Point;
+  size: { w: number; h: number };
+  color: string;
+  width: number;
+}
+
+interface HighlightOp {
+  kind: "highlight";
+  from: Point;
+  to: Point;
+  color: string;
+  width: number;
+}
+
+type Op =
+  | ArrowOp
+  | RectOp
+  | TextOp
+  | BlurOp
+  | StepOp
+  | LineOp
+  | EllipseOp
+  | HighlightOp;
+
+const COLORS = ["#ef4444", "#f59e0b", "#10b981", "#3b82f6", "#a855f7", "#ffffff", "#000000"];
+
+export function Editor() {
+  let canvasRef!: HTMLCanvasElement;
+  let baseImage: HTMLImageElement | null = null;
+
+  const [imagePath, setImagePath] = createSignal<string | null>(null);
+  const [loaded, setLoaded] = createSignal(false);
+  const [tool, setTool] = createSignal<Tool>("arrow");
+  const [color, setColor] = createSignal<string>(COLORS[0]);
+  const [strokeWidth, setStrokeWidth] = createSignal(3);
+  const [textSize, setTextSize] = createSignal(24);
+  const [stepRadius, setStepRadius] = createSignal(16);
+  const [ops, setOps] = createSignal<Op[]>([]);
+  const [redoStack, setRedoStack] = createSignal<Op[]>([]);
+  // 1.0 = fit-to-wrap (handled by CSS max-width); >1.0 = explicit pixel scale.
+  const [zoom, setZoom] = createSignal(1.0);
+  const ZOOM_LEVELS = [0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0];
+  const [draft, setDraft] = createSignal<Op | null>(null);
+  const [textInputAt, setTextInputAt] = createSignal<Point | null>(null);
+  const [textBuffer, setTextBuffer] = createSignal("");
+  const [busy, setBusy] = createSignal<"save" | "copy" | "upload" | null>(null);
+  const [status, setStatus] = createSignal<{ tone: string; msg: string } | null>(null);
+  // tracks whether a paste replaced the canvas — paste doesn't add to ops[]
+  // so isDirty() would otherwise return false, silently discarding the paste
+  const [hasPastedContent, setHasPastedContent] = createSignal(false);
+  const [isHdrSource, setIsHdrSource] = createSignal(false);
+  const [hdrSidecarPath, setHdrSidecarPath] = createSignal<string | null>(null);
+
+  let dragStart: Point | null = null;
+
+  const win = getCurrentWindow();
+
+  const loadImage = async (path: string) => {
+    setLoaded(false);
+    setStatus(null);
+    setOps([]);
+    setRedoStack([]);
+    setDraft(null);
+    setHasPastedContent(false);
+    baseImage = null;
+    setIsHdrSource(false);
+    setHdrSidecarPath(null);
+
+    const ext = path.split(".").pop()?.toLowerCase();
+    if (ext === "gif") {
+      setImagePath(path);
+      setStatus({
+        tone: "err",
+        msg: "GIF editing isn't supported — would flatten frames. Close to keep the original.",
+      });
+      return;
+    }
+
+    setImagePath(path);
+
+    try {
+      const hdr = await api.isHdrCapture(path);
+      setIsHdrSource(hdr);
+      if (hdr) {
+        const dot = path.lastIndexOf(".");
+        const stem = dot > 0 ? path.slice(0, dot) : path;
+        const sidecar = `${stem}.hdr.png`;
+        try {
+          const sidecarIsHdr = await api.isHdrCapture(sidecar);
+          if (sidecarIsHdr) setHdrSidecarPath(sidecar);
+        } catch {
+          // sidecar absent
+        }
+      }
+    } catch {
+      // probe failure isn't fatal — fall through to normal load
+    }
+
+    const img = new Image();
+    img.src = convertFileSrc(path);
+    try {
+      await img.decode();
+    } catch (e) {
+      setStatus({ tone: "err", msg: `image load failed: ${e}` });
+      return;
+    }
+    baseImage = img;
+    canvasRef.width = img.naturalWidth;
+    canvasRef.height = img.naturalHeight;
+    setLoaded(true);
+    redraw();
+  };
+
+  onMount(async () => {
+    const path = await invoke<string | null>("get_editor_image_path");
+    if (!path) {
+      setStatus({ tone: "err", msg: "no image path received from backend" });
+      return;
+    }
+    await loadImage(path);
+  });
+
+  // when the editor window is reused for a new image, the backend emits this
+  // event instead of opening a fresh window. Without a listener here the
+  // canvas would keep showing the previous image while imagePath() points to
+  // the new file — any save would overwrite the wrong file.
+  onMount(async () => {
+    const unlisten = await listen<string>("capscr://editor-load", async (e) => {
+      if (ops().length > 0 || draft() !== null) {
+        const ok = window.confirm(
+          "Discard unsaved annotations and open a new image?",
+        );
+        if (!ok) return;
+      }
+      await loadImage(e.payload);
+    });
+    onCleanup(unlisten);
+  });
+
+  const stepZoom = (dir: 1 | -1) => {
+    const cur = zoom();
+    const idx = ZOOM_LEVELS.findIndex((z) => Math.abs(z - cur) < 0.01);
+    const fallback = ZOOM_LEVELS.findIndex((z) => z >= cur);
+    const start = idx >= 0 ? idx : Math.max(0, fallback);
+    const next = Math.max(0, Math.min(ZOOM_LEVELS.length - 1, start + dir));
+    setZoom(ZOOM_LEVELS[next]);
+  };
+
+  const onKeydown = (e: KeyboardEvent) => {
+    if (textInputAt()) return;
+    const mod = e.ctrlKey || e.metaKey;
+    if (e.key === "z" && mod && !e.shiftKey) {
+      e.preventDefault();
+      undo();
+    } else if ((e.key === "y" && mod) || (e.key === "z" && mod && e.shiftKey)) {
+      e.preventDefault();
+      redo();
+    } else if (mod && (e.key === "=" || e.key === "+")) {
+      e.preventDefault();
+      stepZoom(1);
+    } else if (mod && e.key === "-") {
+      e.preventDefault();
+      stepZoom(-1);
+    } else if (mod && e.key === "0") {
+      e.preventDefault();
+      setZoom(1.0);
+    } else if (e.key === "Escape") {
+      void confirmCloseEditor();
+    } else if (e.key === "1") setTool("arrow");
+    else if (e.key === "2") setTool("rect");
+    else if (e.key === "3") {
+      setTool("text");
+    } else if (e.key === "4") setTool("blur");
+    else if (e.key === "5") setTool("step");
+    else if (e.key === "6") setTool("line");
+    else if (e.key === "7") setTool("ellipse");
+    else if (e.key === "8") setTool("highlight");
+  };
+
+  const onWheelZoom = (e: WheelEvent) => {
+    if (!(e.ctrlKey || e.metaKey)) return;
+    e.preventDefault();
+    stepZoom(e.deltaY < 0 ? 1 : -1);
+  };
+
+  // replace the current canvas with a pasted clipboard image; users expect
+  // paste to work. We accept any image/* type the browser decoded.
+  const onPaste = async (e: ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      if (!it.type.startsWith("image/")) continue;
+      const blob = it.getAsFile();
+      if (!blob) continue;
+      e.preventDefault();
+      const url = URL.createObjectURL(blob);
+      try {
+        const img = new Image();
+        img.src = url;
+        await img.decode();
+        baseImage = img;
+        canvasRef.width = img.naturalWidth;
+        canvasRef.height = img.naturalHeight;
+        setOps([]);
+        setRedoStack([]);
+        setHasPastedContent(true);
+        setLoaded(true);
+        setStatus({
+          tone: "ok",
+          msg: "pasted from clipboard — save to write back to disk.",
+        });
+        redraw();
+      } catch (err) {
+        setStatus({ tone: "err", msg: `paste failed: ${err}` });
+      } finally {
+        URL.revokeObjectURL(url);
+      }
+      return;
+    }
+    setStatus({ tone: "", msg: "paste: only images are accepted here — use the text tool to add text" });
+  };
+
+  // truthy when there's at least one committed edit (or a draft mid-drag).
+  // used by the dirty-state guard so Escape / the close button warn before
+  // throwing away the user's work.
+  const isDirty = () => ops().length > 0 || draft() !== null || hasPastedContent();
+
+  const confirmCloseEditor = async () => {
+    if (!isDirty()) {
+      void win.close();
+      return;
+    }
+    const msg = hasPastedContent()
+      ? "Discard pasted image and unsaved annotations? Changes aren't written to disk until you press Save."
+      : "Discard unsaved annotations? They aren't written back to disk until you press Save.";
+    const ok = window.confirm(msg);
+    if (ok) {
+      void win.close();
+    }
+  };
+
+  onMount(() => {
+    window.addEventListener("keydown", onKeydown);
+    window.addEventListener("paste", onPaste);
+  });
+  onCleanup(() => {
+    window.removeEventListener("keydown", onKeydown);
+    window.removeEventListener("paste", onPaste);
+  });
+
+  // intercept the close button on the titlebar. Without this, clicking X
+  // discards unsaved annotations silently — the same data-loss footgun the
+  // Settings tab already guards against.
+  let closeUnlisten: (() => void) | null = null;
+  onMount(async () => {
+    closeUnlisten = await win.onCloseRequested(async (ev) => {
+      if (!isDirty()) return;
+      const msg = hasPastedContent()
+        ? "Discard pasted image and unsaved annotations? Changes aren't written to disk until you press Save."
+        : "Discard unsaved annotations? They aren't written back to disk until you press Save.";
+      const ok = window.confirm(msg);
+      if (!ok) ev.preventDefault();
+    });
+  });
+  onCleanup(() => closeUnlisten?.());
+
+  function pointFromEvent(e: MouseEvent): Point {
+    const rect = canvasRef.getBoundingClientRect();
+    const scaleX = canvasRef.width / rect.width;
+    const scaleY = canvasRef.height / rect.height;
+    return {
+      x: (e.clientX - rect.left) * scaleX,
+      y: (e.clientY - rect.top) * scaleY,
+    };
+  }
+
+  function redraw() {
+    if (!baseImage) return;
+    const ctx = canvasRef.getContext("2d");
+    if (!ctx) return;
+    ctx.drawImage(baseImage, 0, 0);
+    for (const op of ops()) {
+      renderOp(ctx, op);
+    }
+    const d = draft();
+    if (d) renderOp(ctx, d);
+  }
+
+  function renderOp(ctx: CanvasRenderingContext2D, op: Op) {
+    switch (op.kind) {
+      case "arrow":
+        drawArrow(ctx, op.from, op.to, op.color, op.width);
+        break;
+      case "rect":
+        ctx.strokeStyle = op.color;
+        ctx.lineWidth = op.width;
+        ctx.lineJoin = "miter";
+        ctx.strokeRect(op.origin.x, op.origin.y, op.size.w, op.size.h);
+        break;
+      case "text":
+        ctx.fillStyle = op.color;
+        ctx.font = `${op.fontSize}px "Fira Code", "Hack", ui-monospace, monospace`;
+        ctx.textBaseline = "top";
+        // black shadow for legibility
+        ctx.shadowColor = "rgba(0,0,0,0.85)";
+        ctx.shadowBlur = 4;
+        ctx.fillText(op.text, op.origin.x, op.origin.y);
+        ctx.shadowBlur = 0;
+        ctx.shadowColor = "transparent";
+        break;
+      case "blur":
+        applyBlur(ctx, op);
+        break;
+      case "step":
+        drawStep(ctx, op);
+        break;
+      case "line":
+        ctx.strokeStyle = op.color;
+        ctx.lineWidth = op.width;
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.moveTo(op.from.x, op.from.y);
+        ctx.lineTo(op.to.x, op.to.y);
+        ctx.stroke();
+        break;
+      case "ellipse": {
+        const cx = op.origin.x + op.size.w / 2;
+        const cy = op.origin.y + op.size.h / 2;
+        const rx = Math.abs(op.size.w) / 2;
+        const ry = Math.abs(op.size.h) / 2;
+        ctx.strokeStyle = op.color;
+        ctx.lineWidth = op.width;
+        ctx.beginPath();
+        ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+        ctx.stroke();
+        break;
+      }
+      case "highlight":
+        // semi-transparent thick stroke, behaves like a text-marker pen
+        ctx.save();
+        ctx.globalAlpha = 0.35;
+        ctx.globalCompositeOperation = "multiply";
+        ctx.strokeStyle = op.color;
+        ctx.lineWidth = op.width;
+        ctx.lineCap = "butt";
+        ctx.beginPath();
+        ctx.moveTo(op.from.x, op.from.y);
+        ctx.lineTo(op.to.x, op.to.y);
+        ctx.stroke();
+        ctx.restore();
+        break;
+    }
+  }
+
+  function drawStep(ctx: CanvasRenderingContext2D, op: StepOp) {
+    const r = op.radius;
+    ctx.beginPath();
+    ctx.arc(op.center.x, op.center.y, r, 0, Math.PI * 2);
+    ctx.fillStyle = op.color;
+    ctx.fill();
+    // contrasting outline so the pin reads on busy backgrounds
+    ctx.strokeStyle = "rgba(0,0,0,0.6)";
+    ctx.lineWidth = Math.max(1, r * 0.08);
+    ctx.stroke();
+    const label = String(op.number);
+    // white text on the colored disk
+    ctx.fillStyle = "#ffffff";
+    ctx.font = `bold ${Math.round(r * 1.1)}px "Fira Code", "Hack", ui-monospace, monospace`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.shadowColor = "rgba(0,0,0,0.65)";
+    ctx.shadowBlur = 3;
+    ctx.fillText(label, op.center.x, op.center.y + 1);
+    ctx.shadowBlur = 0;
+    ctx.shadowColor = "transparent";
+    ctx.textAlign = "start";
+    ctx.textBaseline = "alphabetic";
+  }
+
+  function drawArrow(
+    ctx: CanvasRenderingContext2D,
+    a: Point,
+    b: Point,
+    col: string,
+    w: number,
+  ) {
+    ctx.strokeStyle = col;
+    ctx.fillStyle = col;
+    ctx.lineWidth = w;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const len = Math.hypot(dx, dy);
+    if (len < 1) return;
+    const ux = dx / len;
+    const uy = dy / len;
+    const head = Math.max(10, w * 3);
+    const wing = head * 0.5;
+    const p1 = { x: b.x - ux * head + -uy * wing, y: b.y - uy * head + ux * wing };
+    const p2 = { x: b.x - ux * head - -uy * wing, y: b.y - uy * head - ux * wing };
+    ctx.beginPath();
+    ctx.moveTo(b.x, b.y);
+    ctx.lineTo(p1.x, p1.y);
+    ctx.lineTo(p2.x, p2.y);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  function applyBlur(ctx: CanvasRenderingContext2D, op: BlurOp) {
+    const canvasW = ctx.canvas.width;
+    const canvasH = ctx.canvas.height;
+    // clamp to canvas bounds so getImageData never reads outside — reads
+    // outside return transparent black and corrupt the average at edges
+    const x = Math.max(0, Math.min(Math.floor(op.origin.x), canvasW - 1));
+    const y = Math.max(0, Math.min(Math.floor(op.origin.y), canvasH - 1));
+    const w = Math.max(1, Math.min(Math.floor(op.size.w), canvasW - x));
+    const h = Math.max(1, Math.min(Math.floor(op.size.h), canvasH - y));
+    if (w <= 0 || h <= 0) return;
+
+    // use a pixelate-style mosaic — it's faster and more privacy-safe than a true blur.
+    const cell = Math.max(4, op.radius);
+    const cols = Math.ceil(w / cell);
+    const rows = Math.ceil(h / cell);
+    for (let row = 0; row < rows; row++) {
+      for (let col = 0; col < cols; col++) {
+        const sx = x + col * cell;
+        const sy = y + row * cell;
+        const sw = Math.min(cell, w - col * cell);
+        const sh = Math.min(cell, h - row * cell);
+        const data = ctx.getImageData(sx, sy, sw, sh).data;
+        let r = 0, g = 0, b = 0, n = 0;
+        for (let i = 0; i < data.length; i += 4) {
+          r += data[i];
+          g += data[i + 1];
+          b += data[i + 2];
+          n++;
+        }
+        ctx.fillStyle = `rgb(${(r / n) | 0}, ${(g / n) | 0}, ${(b / n) | 0})`;
+        ctx.fillRect(sx, sy, sw, sh);
+      }
+    }
+  }
+
+  function onMouseDown(e: MouseEvent) {
+    if (!loaded()) return;
+    if (textInputAt()) return;
+    const p = pointFromEvent(e);
+    const t = tool();
+    dragStart = p;
+    if (t === "arrow") {
+      setDraft({ kind: "arrow", from: p, to: p, color: color(), width: strokeWidth() });
+    } else if (t === "rect") {
+      setDraft({ kind: "rect", origin: p, size: { w: 0, h: 0 }, color: color(), width: strokeWidth() });
+    } else if (t === "blur") {
+      setDraft({ kind: "blur", origin: p, size: { w: 0, h: 0 }, radius: 12 });
+    } else if (t === "line") {
+      setDraft({ kind: "line", from: p, to: p, color: color(), width: strokeWidth() });
+    } else if (t === "ellipse") {
+      setDraft({
+        kind: "ellipse",
+        origin: p,
+        size: { w: 0, h: 0 },
+        color: color(),
+        width: strokeWidth(),
+      });
+    } else if (t === "highlight") {
+      // 3x default stroke so the marker actually feels like a highlighter
+      setDraft({
+        kind: "highlight",
+        from: p,
+        to: p,
+        color: color(),
+        width: Math.max(8, strokeWidth() * 4),
+      });
+    } else if (t === "text") {
+      setTextInputAt(p);
+      setTextBuffer("");
+      // focus the input after solid renders it
+      setTimeout(() => {
+        const el = document.getElementById("editor-text-input") as HTMLInputElement | null;
+        el?.focus();
+      }, 0);
+    } else if (t === "step") {
+      // click-to-drop, not drag. Auto-increment from the highest existing
+      // step number so undo/redo stays consistent.
+      const next = nextStepNumber();
+      const op: StepOp = {
+        kind: "step",
+        center: p,
+        number: next,
+        color: color(),
+        radius: stepRadius(),
+      };
+      setOps([...ops(), op]);
+      setRedoStack([]);
+      dragStart = null;
+      redraw();
+    }
+  }
+
+  function nextStepNumber(): number {
+    let max = 0;
+    for (const op of ops()) {
+      if (op.kind === "step" && op.number > max) max = op.number;
+    }
+    return max + 1;
+  }
+
+  function onMouseMove(e: MouseEvent) {
+    if (!dragStart) return;
+    const p = pointFromEvent(e);
+    const d = draft();
+    if (!d) return;
+    if (d.kind === "arrow" || d.kind === "line" || d.kind === "highlight") {
+      setDraft({ ...d, to: p });
+    } else if (d.kind === "rect" || d.kind === "blur" || d.kind === "ellipse") {
+      const ox = Math.min(dragStart.x, p.x);
+      const oy = Math.min(dragStart.y, p.y);
+      const w = Math.abs(p.x - dragStart.x);
+      const h = Math.abs(p.y - dragStart.y);
+      setDraft({ ...d, origin: { x: ox, y: oy }, size: { w, h } });
+    }
+    redraw();
+  }
+
+  function onMouseUp() {
+    const d = draft();
+    dragStart = null;
+    if (!d) return;
+    // discard zero-size drafts
+    if (d.kind === "arrow" || d.kind === "line" || d.kind === "highlight") {
+      const dx = d.to.x - d.from.x;
+      const dy = d.to.y - d.from.y;
+      if (Math.hypot(dx, dy) < 3) {
+        setDraft(null);
+        redraw();
+        return;
+      }
+    }
+    if (d.kind === "rect" || d.kind === "blur" || d.kind === "ellipse") {
+      if (d.size.w < 3 || d.size.h < 3) {
+        setDraft(null);
+        redraw();
+        return;
+      }
+    }
+    setOps([...ops(), d]);
+    setRedoStack([]);
+    setDraft(null);
+    redraw();
+  }
+
+  function commitText() {
+    const at = textInputAt();
+    const t = textBuffer().trim();
+    if (at && t.length > 0) {
+      setOps([
+        ...ops(),
+        { kind: "text", origin: at, text: t, color: color(), fontSize: textSize() },
+      ]);
+      setRedoStack([]);
+    }
+    setTextInputAt(null);
+    setTextBuffer("");
+    redraw();
+  }
+
+  function cancelText() {
+    setTextInputAt(null);
+    setTextBuffer("");
+  }
+
+  function undo() {
+    const cur = ops();
+    if (cur.length === 0) return;
+    const last = cur[cur.length - 1];
+    setOps(cur.slice(0, -1));
+    setRedoStack([...redoStack(), last]);
+    redraw();
+  }
+
+  function redo() {
+    const stack = redoStack();
+    if (stack.length === 0) return;
+    const next = stack[stack.length - 1];
+    setRedoStack(stack.slice(0, -1));
+    setOps([...ops(), next]);
+    redraw();
+  }
+
+  function targetMime(): string {
+    const path = imagePath() ?? "";
+    const ext = path.split(".").pop()?.toLowerCase() ?? "png";
+    switch (ext) {
+      case "jpg":
+      case "jpeg":
+        return "image/jpeg";
+      case "webp":
+        return "image/webp";
+      // bmp and gif aren't first-class encoders in browsers; fall through to png
+      // to avoid silently writing wrong bytes to an extension we can't honour.
+      default:
+        return "image/png";
+    }
+  }
+
+  async function exportBytes(mime: string): Promise<Uint8Array> {
+    const blob: Blob = await new Promise((res, rej) => {
+      canvasRef.toBlob(
+        (b) => (b ? res(b) : rej(new Error(`toBlob(${mime}) failed`))),
+        mime,
+      );
+    });
+    const buf = await blob.arrayBuffer();
+    return new Uint8Array(buf);
+  }
+
+  async function onSave() {
+    const path = imagePath();
+    if (!path) return;
+    setBusy("save");
+    setStatus({ tone: "", msg: "writing..." });
+    try {
+      // encode in the source file's format so we don't write PNG bytes to a
+      // .jpg path (which would silently corrupt the file for downstream
+      // consumers that trust the extension).
+      const bytes = await exportBytes(targetMime());
+      await invoke<void>("save_edited_image", {
+        bytes: Array.from(bytes),
+        targetPath: path,
+      });
+      setOps([]);
+      setHasPastedContent(false);
+      setStatus({ tone: "ok", msg: "saved." });
+      setTimeout(() => void win.close(), 400);
+    } catch (e) {
+      setStatus({ tone: "err", msg: `save failed: ${e}` });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function onCopy() {
+    setBusy("copy");
+    setStatus({ tone: "", msg: "copying..." });
+    try {
+      // clipboard always wants PNG — that's what the Rust ClipboardManager
+      // expects to decode.
+      const bytes = await exportBytes("image/png");
+      await invoke<void>("copy_edited_image_to_clipboard", {
+        bytes: Array.from(bytes),
+      });
+      setStatus({ tone: "ok", msg: "copied to clipboard." });
+    } catch (e) {
+      setStatus({ tone: "err", msg: `copy failed: ${e}` });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function onUpload() {
+    setBusy("upload");
+    setStatus({ tone: "", msg: "uploading..." });
+    try {
+      // upload path also expects PNG — the existing ImageUploader.upload
+      // re-encodes, so we feed it canonical bytes.
+      const bytes = await exportBytes("image/png");
+      const result = await invoke<{ url: string; delete_url: string | null }>(
+        "upload_edited_image",
+        { bytes: Array.from(bytes) },
+      );
+      setStatus({ tone: "ok", msg: result.url });
+    } catch (e) {
+      setStatus({ tone: "err", msg: `upload failed: ${e}` });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div class="editor">
+      <Titlebar context="edit" />
+
+      <div class="editor-toolbar">
+        <div class="editor-tools">
+          <button
+            type="button"
+            class="tool"
+            classList={{ "is-active": tool() === "arrow" }}
+            onClick={() => setTool("arrow")}
+            title="arrow (1)"
+          >
+            <ArrowRight size={14} stroke-width={1.5} />
+          </button>
+          <button
+            type="button"
+            class="tool"
+            classList={{ "is-active": tool() === "rect" }}
+            onClick={() => setTool("rect")}
+            title="rectangle (2)"
+          >
+            <Square size={14} stroke-width={1.5} />
+          </button>
+          <button
+            type="button"
+            class="tool"
+            classList={{ "is-active": tool() === "text" }}
+            onClick={() => setTool("text")}
+            title="text (3)"
+          >
+            <Type size={14} stroke-width={1.5} />
+          </button>
+          <button
+            type="button"
+            class="tool"
+            classList={{ "is-active": tool() === "blur" }}
+            onClick={() => setTool("blur")}
+            title="pixelate (4)"
+          >
+            <Droplet size={14} stroke-width={1.5} />
+          </button>
+          <button
+            type="button"
+            class="tool"
+            classList={{ "is-active": tool() === "step" }}
+            onClick={() => setTool("step")}
+            title="numbered step (5)"
+          >
+            <Circle size={14} stroke-width={1.5} />
+          </button>
+          <button
+            type="button"
+            class="tool"
+            classList={{ "is-active": tool() === "line" }}
+            onClick={() => setTool("line")}
+            title="line (6)"
+          >
+            <Minus size={14} stroke-width={1.5} />
+          </button>
+          <button
+            type="button"
+            class="tool"
+            classList={{ "is-active": tool() === "ellipse" }}
+            onClick={() => setTool("ellipse")}
+            title="ellipse (7)"
+          >
+            <CircleDashed size={14} stroke-width={1.5} />
+          </button>
+          <button
+            type="button"
+            class="tool"
+            classList={{ "is-active": tool() === "highlight" }}
+            onClick={() => setTool("highlight")}
+            title="highlighter (8)"
+          >
+            <Highlighter size={14} stroke-width={1.5} />
+          </button>
+        </div>
+
+        <div class="editor-colors">
+          <For each={COLORS}>
+            {(c) => (
+              <button
+                type="button"
+                class="swatch"
+                classList={{ "is-active": color() === c }}
+                style={{ background: c }}
+                onClick={() => setColor(c)}
+                aria-label={c}
+              />
+            )}
+          </For>
+        </div>
+
+        <div class="editor-controls">
+          <Show
+            when={
+              tool() === "arrow" ||
+              tool() === "rect" ||
+              tool() === "line" ||
+              tool() === "ellipse" ||
+              tool() === "highlight"
+            }
+          >
+            <label class="ctrl">
+              <span>stroke</span>
+              <input
+                type="range"
+                min={1}
+                max={20}
+                value={strokeWidth()}
+                onInput={(e) => setStrokeWidth(parseInt(e.currentTarget.value))}
+              />
+              <span class="ctrl-val">{strokeWidth()}</span>
+            </label>
+          </Show>
+          <Show when={tool() === "text"}>
+            <label class="ctrl">
+              <span>size</span>
+              <input
+                type="range"
+                min={10}
+                max={72}
+                value={textSize()}
+                onInput={(e) => setTextSize(parseInt(e.currentTarget.value))}
+              />
+              <span class="ctrl-val">{textSize()}</span>
+            </label>
+          </Show>
+          <Show when={tool() === "step"}>
+            <label class="ctrl">
+              <span>size</span>
+              <input
+                type="range"
+                min={8}
+                max={48}
+                value={stepRadius()}
+                onInput={(e) => setStepRadius(parseInt(e.currentTarget.value))}
+              />
+              <span class="ctrl-val">{stepRadius()}</span>
+            </label>
+          </Show>
+        </div>
+
+        <div class="editor-actions">
+          <button
+            class="btn"
+            data-variant="ghost"
+            onClick={undo}
+            title="ctrl+z"
+            disabled={ops().length === 0}
+          >
+            <RotateCcw size={12} stroke-width={1.5} />
+            undo
+          </button>
+          <button
+            class="btn"
+            data-variant="ghost"
+            onClick={redo}
+            title="ctrl+y"
+            disabled={redoStack().length === 0}
+          >
+            <RotateCw size={12} stroke-width={1.5} />
+            redo
+          </button>
+          <span class="editor-zoom-group">
+            <button
+              class="btn"
+              data-variant="ghost"
+              data-size="xs"
+              onClick={() => stepZoom(-1)}
+              title="ctrl+-"
+              disabled={zoom() <= ZOOM_LEVELS[0]}
+            >
+              <ZoomOut size={11} stroke-width={1.5} />
+            </button>
+            <button
+              class="btn"
+              data-variant="ghost"
+              data-size="xs"
+              onClick={() => setZoom(1.0)}
+              title="ctrl+0"
+            >
+              <Maximize2 size={11} stroke-width={1.5} />
+              {Math.round(zoom() * 100)}%
+            </button>
+            <button
+              class="btn"
+              data-variant="ghost"
+              data-size="xs"
+              onClick={() => stepZoom(1)}
+              title="ctrl+="
+              disabled={zoom() >= ZOOM_LEVELS[ZOOM_LEVELS.length - 1]}
+            >
+              <ZoomIn size={11} stroke-width={1.5} />
+            </button>
+          </span>
+          <button class="btn" onClick={onSave} disabled={busy() !== null}>
+            <Save size={12} stroke-width={1.5} />
+            save
+          </button>
+          <button class="btn" data-variant="ghost" onClick={onCopy} disabled={busy() !== null}>
+            <Copy size={12} stroke-width={1.5} />
+            copy
+          </button>
+          <button class="btn" data-variant="ghost" onClick={onUpload} disabled={busy() !== null}>
+            <Upload size={12} stroke-width={1.5} />
+            upload
+          </button>
+          <button class="btn" data-variant="ghost" onClick={() => void win.close()}>
+            <X size={12} stroke-width={1.5} />
+            close
+          </button>
+        </div>
+      </div>
+
+      <Show when={isHdrSource()}>
+        <div class="editor-hdr-banner" role="status">
+          <span class="editor-hdr-glyph">▮</span>
+          <span class="editor-hdr-text">
+            <strong>HDR capture detected.</strong>
+            <Show
+              when={hdrSidecarPath()}
+              fallback={
+                <span>
+                  {" "}canvas annotates in SDR; saving from here will flatten the HDR file
+                  to SDR. close the editor without saving to keep the original HDR.
+                </span>
+              }
+            >
+              <span>
+                {" "}capscr kept the HDR original as <code>{hdrSidecarPath()!.split(/[\\/]/).pop()}</code>{" "}
+                — annotations save into the SDR copy; the HDR sidecar is untouched.
+              </span>
+            </Show>
+          </span>
+        </div>
+      </Show>
+
+      <div class="editor-canvas-wrap" onWheel={onWheelZoom}>
+        <Show
+          when={loaded()}
+          fallback={
+            <div class="editor-loading">
+              <span class="lede">loading capture...</span>
+            </div>
+          }
+        >
+          <div
+            class="editor-canvas-scroll"
+            style={{ width: `${canvasRef ? canvasRef.width * zoom() : 0}px` }}
+          >
+            <canvas
+              ref={canvasRef!}
+              class="editor-canvas"
+              data-tool={tool()}
+              style={{
+                width: `${canvasRef ? canvasRef.width * zoom() : 0}px`,
+                height: `${canvasRef ? canvasRef.height * zoom() : 0}px`,
+                "max-width": "none",
+              }}
+              onMouseDown={onMouseDown}
+              onMouseMove={onMouseMove}
+              onMouseUp={onMouseUp}
+              onMouseLeave={onMouseUp}
+            />
+            <Show when={textInputAt()}>
+              <div
+                class="editor-text-input-wrap"
+                style={(() => {
+                  const at = textInputAt()!;
+                  const rect = canvasRef.getBoundingClientRect();
+                  const scaleX = rect.width / canvasRef.width;
+                  const scaleY = rect.height / canvasRef.height;
+                  return {
+                    left: `${at.x * scaleX}px`,
+                    top: `${at.y * scaleY}px`,
+                  };
+                })()}
+              >
+                <input
+                  id="editor-text-input"
+                  type="text"
+                  class="editor-text-input"
+                  value={textBuffer()}
+                  onInput={(e) => setTextBuffer(e.currentTarget.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      commitText();
+                    } else if (e.key === "Escape") {
+                      e.preventDefault();
+                      cancelText();
+                    }
+                  }}
+                  onBlur={commitText}
+                  placeholder="type, enter to commit"
+                />
+              </div>
+            </Show>
+          </div>
+        </Show>
+      </div>
+
+      <footer class="editor-foot">
+        <Show when={status()}>
+          <span class="flash" data-tone={status()!.tone}>
+            {status()!.msg}
+          </span>
+        </Show>
+        <span class="grow" />
+        <Show when={loaded() && baseImage}>
+          <span class="muted">
+            {baseImage!.naturalWidth} × {baseImage!.naturalHeight}
+          </span>
+        </Show>
+      </footer>
+    </div>
+  );
+}

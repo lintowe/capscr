@@ -1,0 +1,173 @@
+[package]
+name = "capscr"
+version = "0.5.27"
+edition = "2021"
+description = "Fast HDR-aware Windows screen capture — tray-first, signed updates, no telemetry."
+authors = ["rot <96458554+rotlove@users.noreply.github.com>"]
+license = "MIT"
+repository = "https://github.com/lintowe/capscr"
+homepage = "https://rot.lt/work/capscr"
+
+[features]
+default = ["sftp", "plugin-runtime"]
+# WASM plugin runtime host. When enabled, src/plugin/wasm.rs is compiled
+# and PluginManager::load_all instantiates plugins with `runtime = "wasm"`
+# in their plugin.toml. Shipped on by default since 0.4.0.
+plugin-runtime = ["dep:wasmtime"]
+# SFTP upload destination. Adds russh + russh-sftp (pure-rust SSH). default-on;
+# can be disabled with --no-default-features to skip the SSH stack entirely.
+sftp = ["dep:russh", "dep:russh-sftp"]
+
+[dependencies]
+# GUI shell. tauri-runtime-wry 2.9.x has a Send+Sync mismatch with current wry
+# release. Forcing the wry source to a known-good tag via [patch.crates-io] below.
+tauri = { version = "2", features = ["tray-icon", "image-png", "image-ico", "protocol-asset"] }
+tauri-plugin-clipboard-manager = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-autostart = "2"
+tauri-plugin-window-state = "2"
+tauri-plugin-single-instance = "2"
+
+# Global hotkeys (native, OS-event-driven via crossbeam channel)
+global-hotkey = "0.6"
+
+# Used to select between the hotkey-event channel and the reload-command
+# channel in the hotkey thread — replaces a 100ms busy-poll loop that drained
+# laptop batteries.
+crossbeam-channel = "0.5"
+
+# Screen capture
+xcap = "0.0.14"
+
+# image processing and formats. tauri pulls image with its default features for
+# icon handling, and cargo unifies features additively, so the full codec set is
+# always built regardless of what we request here — default-features=false would
+# be a no-op. we just pin the formats capscr itself encodes/decodes.
+image = { version = "0.25", features = ["png", "jpeg", "gif", "webp", "bmp"] }
+
+# gif encoding. 0.14 matches the version image already pulls in via its gif
+# feature, so the two collapse to one crate instead of compiling 0.13 and 0.14
+gif = "0.14"
+
+color_quant = "1.1"
+
+# Clipboard (native fallback)
+arboard = "3.4"
+
+# Configuration
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+directories = "5.0"
+
+# HTTP client for uploads
+reqwest = { version = "0.12", features = ["blocking", "multipart"] }
+
+# URL parsing for security validation
+url = "2.5"
+
+# Async runtime
+tokio = { version = "1.0", features = ["rt-multi-thread", "time", "sync", "macros"] }
+
+# Error handling
+anyhow = "1.0"
+thiserror = "2.0"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Date/time for filenames
+chrono = "0.4"
+
+# Native notifications (the tauri plugin doesn't expose a Rust-side API yet)
+notify-rust = "4.11"
+
+# UUID for unique identifiers
+uuid = { version = "1.0", features = ["v4"] }
+
+# Plugin system: zip extraction (marketplace) + wasmtime (0.4 plugin runtime
+# host). wasmtime is opt-in via the `plugin-runtime` feature so the default
+# build stays small while we iterate on the host API.
+zip = "2.2"
+semver = "1.0"
+wasmtime = { version = "43", default-features = false, features = ["cranelift", "runtime", "std"], optional = true }
+
+# Marketplace integrity — sha256 of plugin payload + hex en/decode for the
+# manifest entry. Both already transitive; pinning them as direct deps so the
+# marketplace path doesn't break on upstream churn.
+sha2 = "0.10"
+hex = "0.4"
+
+# Upload destinations: FTP via suppaftp, SFTP via russh under the `sftp`
+# feature. russh 0.60.3 patches RUSTSEC-2026-0153 / RUSTSEC-2026-0154; from 0.60
+# it needs a crypto backend (ring or aws-lc-rs). aws-lc-sys fails to compile on
+# the current MSVC, so the default aws-lc-rs is disabled and `ring` is used.
+suppaftp = { version = "6.0", features = ["native-tls"] }
+russh = { version = "0.60.3", default-features = false, features = ["flate2", "rsa", "ring"], optional = true }
+russh-sftp = { version = "2", optional = true }
+
+# HDR-preserved output (Phase 10 will add JXL/AVIF; pure-rust PNG cICP is fine here)
+png = "0.17"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Shell",
+    "Win32_UI_Shell_Common",
+    "Win32_UI_Shell_PropertiesSystem",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Console",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Variant",
+    "Win32_System_WinRT",
+    "Win32_System_WinRT_Direct3D11",
+    "Win32_System_WinRT_Graphics_Capture",
+    "Win32_Graphics_Gdi",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct2D",
+    "Win32_Graphics_Direct2D_Common",
+    "Win32_Media_Audio",
+    "Win32_Media_Audio_XAudio2",
+    "Win32_Devices_Display",
+    "Win32_Security_Cryptography",
+    "Graphics_Capture",
+    "Graphics_DirectX",
+    "Graphics_DirectX_Direct3D11",
+    "Graphics_Imaging",
+    "Foundation",
+    "Foundation_Collections",
+] }
+
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dev-dependencies]
+tempfile = "3"
+# compiles hand-written WAT into wasm bytes for the plugin-runtime end-to-end
+# tests. test-only — never linked into the shipped binary.
+wat = "1"
+
+[patch.crates-io]
+# Force wry to the last release before the Send+Sync breaking change in
+# new_window_req_handler. tauri-runtime-wry 2.9.x calls it with a Send-only
+# closure and won't compile against wry 0.53+.
+wry = { git = "https://github.com/tauri-apps/wry", tag = "wry-v0.52.1" }
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
