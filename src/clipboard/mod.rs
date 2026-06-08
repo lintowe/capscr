@@ -29,7 +29,9 @@ impl ClipboardManager {
     where
         F: FnMut(&mut Clipboard) -> std::result::Result<T, arboard::Error>,
     {
-        let _lock = CLIPBOARD_LOCK.lock().map_err(|_| anyhow!("Clipboard lock poisoned"))?;
+        let _lock = CLIPBOARD_LOCK
+            .lock()
+            .map_err(|_| anyhow!("Clipboard lock poisoned"))?;
 
         let mut last_error = None;
 
@@ -101,9 +103,8 @@ impl ClipboardManager {
 
 const WINDOWS_INVALID_CHARS: &[char] = &['<', '>', ':', '"', '/', '\\', '|', '?', '*'];
 const WINDOWS_RESERVED_NAMES: &[&str] = &[
-    "CON", "PRN", "AUX", "NUL",
-    "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
-    "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+    "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
 ];
 
 pub fn get_unique_filepath(path: &Path) -> std::path::PathBuf {
@@ -111,7 +112,11 @@ pub fn get_unique_filepath(path: &Path) -> std::path::PathBuf {
     // race where two simultaneous captures both see "not exists" and write the
     // same filename, with the second clobbering the first.
     let try_claim = |p: &Path| -> bool {
-        match std::fs::OpenOptions::new().write(true).create_new(true).open(p) {
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(p)
+        {
             Ok(_) => true,
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => false,
             // parent dir not yet created — treat path as available; save_image
@@ -203,7 +208,8 @@ pub fn save_image<P: AsRef<Path>>(
 
     let path = path.as_ref();
 
-    let filename = path.file_name()
+    let filename = path
+        .file_name()
         .ok_or_else(|| anyhow!("Invalid filename"))?
         .to_string_lossy();
 
@@ -310,9 +316,7 @@ fn should_emit(title: &str, body: &str) -> bool {
     };
     let now = Instant::now();
     if let Some((t, b, when)) = guard.as_ref() {
-        if t == title
-            && b == body
-            && now.duration_since(*when).as_millis() < NOTIFICATION_DEDUPE_MS
+        if t == title && b == body && now.duration_since(*when).as_millis() < NOTIFICATION_DEDUPE_MS
         {
             return false;
         }

@@ -157,11 +157,7 @@ pub fn install_plugin(plugins_dir: &Path, entry: &RegistryEntry) -> Result<()> {
     let got = hex::encode(hasher.finalize());
     let want = entry.sha256.trim().to_lowercase();
     if got != want {
-        bail!(
-            "sha256 mismatch — got {}, registry expected {}",
-            got,
-            want
-        );
+        bail!("sha256 mismatch — got {}, registry expected {}", got, want);
     }
 
     // stage into a temp dir, then atomic-rename into place. If anything
@@ -199,9 +195,12 @@ pub fn install_plugin(plugins_dir: &Path, entry: &RegistryEntry) -> Result<()> {
         // defense-in-depth on top of enclosed_name (which already rejects
         // `..` traversal): reject absolute paths and component-level `..`.
         if raw_name.is_absolute()
-            || raw_name
-                .components()
-                .any(|c| matches!(c, std::path::Component::ParentDir | std::path::Component::RootDir))
+            || raw_name.components().any(|c| {
+                matches!(
+                    c,
+                    std::path::Component::ParentDir | std::path::Component::RootDir
+                )
+            })
         {
             let _ = std::fs::remove_dir_all(&staging);
             bail!("zip entry escapes plugin folder: {:?}", raw_name);
@@ -214,11 +213,7 @@ pub fn install_plugin(plugins_dir: &Path, entry: &RegistryEntry) -> Result<()> {
         let file_size = file.size();
         if file_size > MAX_PLUGIN_FILE_BYTES {
             let _ = std::fs::remove_dir_all(&staging);
-            bail!(
-                "zip entry too large: {:?} ({} bytes)",
-                raw_name,
-                file_size
-            );
+            bail!("zip entry too large: {:?} ({} bytes)", raw_name, file_size);
         }
         total_extracted += file_size;
         if total_extracted > MAX_PLUGIN_TOTAL_BYTES {

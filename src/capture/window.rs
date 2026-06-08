@@ -53,10 +53,7 @@ impl WindowCapture {
         let mut app_windows: Vec<WindowInfo> = windows
             .into_iter()
             .filter(|w| {
-                !w.title().is_empty()
-                    && w.width() > 50
-                    && w.height() > 50
-                    && !w.is_minimized()
+                !w.title().is_empty() && w.width() > 50 && w.height() > 50 && !w.is_minimized()
             })
             .map(|w| WindowInfo {
                 id: w.id(),
@@ -87,12 +84,14 @@ impl Capture for WindowCapture {
         #[cfg(windows)]
         {
             use windows::Win32::Foundation::{HWND, RECT};
-            use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_EXTENDED_FRAME_BOUNDS};
+            use windows::Win32::Graphics::Dwm::{
+                DwmGetWindowAttribute, DWMWA_EXTENDED_FRAME_BOUNDS,
+            };
             use windows::Win32::UI::WindowsAndMessaging::GetWindowRect;
 
             let wgc_on = super::wgc_enabled();
             let hwnd = HWND(self.window_id as usize as *mut _);
-            
+
             let center_res = unsafe {
                 let mut r = RECT::default();
                 let ok = DwmGetWindowAttribute(
@@ -100,7 +99,8 @@ impl Capture for WindowCapture {
                     DWMWA_EXTENDED_FRAME_BOUNDS,
                     &mut r as *mut RECT as *mut _,
                     std::mem::size_of::<RECT>() as u32,
-                ).is_ok();
+                )
+                .is_ok();
                 if ok || GetWindowRect(hwnd, &mut r).is_ok() {
                     Ok(((r.left + r.right) / 2, (r.top + r.bottom) / 2))
                 } else {
@@ -117,14 +117,16 @@ impl Capture for WindowCapture {
                             Ok(img) => {
                                 tracing::info!(
                                     "WGC capture (window {}) {}x{} in {}ms",
-                                    self.window_id, img.width(), img.height(),
+                                    self.window_id,
+                                    img.width(),
+                                    img.height(),
                                     t0.elapsed().as_millis()
                                 );
                                 return Ok(img);
                             }
-                            Err(e) => tracing::warn!(
-                                "WGC window capture failed — fallthrough: {e:#}"
-                            ),
+                            Err(e) => {
+                                tracing::warn!("WGC window capture failed — fallthrough: {e:#}")
+                            }
                         }
                     } else {
                         match self_capture_screen_region(self.window_id) {
@@ -198,4 +200,3 @@ fn self_capture_screen_region(hwnd_u32: u32) -> Result<RgbaImage> {
     };
     super::region::RegionCapture::new(region).capture()
 }
-

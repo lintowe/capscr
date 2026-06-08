@@ -38,8 +38,8 @@ pub fn decrypt(blob: &str) -> Result<String> {
 #[cfg(windows)]
 fn encrypt_win(plaintext: &str) -> Result<String> {
     use windows::Win32::Foundation::LocalFree;
-    use windows::Win32::Security::Cryptography::{CryptProtectData, CRYPT_INTEGER_BLOB};
     use windows::Win32::Foundation::HLOCAL;
+    use windows::Win32::Security::Cryptography::{CryptProtectData, CRYPT_INTEGER_BLOB};
 
     let mut input = plaintext.as_bytes().to_vec();
     let in_blob = CRYPT_INTEGER_BLOB {
@@ -65,9 +65,8 @@ fn encrypt_win(plaintext: &str) -> Result<String> {
         )
         .map_err(|e| anyhow!("CryptProtectData: {e}"))?;
     }
-    let slice = unsafe {
-        std::slice::from_raw_parts(out_blob.pbData, out_blob.cbData as usize).to_vec()
-    };
+    let slice =
+        unsafe { std::slice::from_raw_parts(out_blob.pbData, out_blob.cbData as usize).to_vec() };
     unsafe {
         let _ = LocalFree(HLOCAL(out_blob.pbData as *mut _));
     }
@@ -78,8 +77,8 @@ fn encrypt_win(plaintext: &str) -> Result<String> {
 fn decrypt_win(blob: &str) -> Result<String> {
     use windows::core::PWSTR;
     use windows::Win32::Foundation::LocalFree;
-    use windows::Win32::Security::Cryptography::{CryptUnprotectData, CRYPT_INTEGER_BLOB};
     use windows::Win32::Foundation::HLOCAL;
+    use windows::Win32::Security::Cryptography::{CryptUnprotectData, CRYPT_INTEGER_BLOB};
 
     let mut bytes = hex::decode(blob).map_err(|e| anyhow!("bad hex: {e}"))?;
     let in_blob = CRYPT_INTEGER_BLOB {
@@ -105,9 +104,8 @@ fn decrypt_win(blob: &str) -> Result<String> {
         )
         .map_err(|e| anyhow!("CryptUnprotectData: {e}"))?;
     }
-    let plaintext_bytes = unsafe {
-        std::slice::from_raw_parts(out_blob.pbData, out_blob.cbData as usize).to_vec()
-    };
+    let plaintext_bytes =
+        unsafe { std::slice::from_raw_parts(out_blob.pbData, out_blob.cbData as usize).to_vec() };
     unsafe {
         let _ = LocalFree(HLOCAL(out_blob.pbData as *mut _));
         if !desc.is_null() {

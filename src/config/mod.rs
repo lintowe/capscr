@@ -790,7 +790,10 @@ impl Config {
         let mut seen_hotkeys = std::collections::HashSet::new();
         for task in &self.capture_tasks {
             if task.id.is_empty()
-                || !task.id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+                || !task
+                    .id
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
             {
                 return Err(anyhow!(
                     "capture_task id '{}' must be lowercase alphanumeric with hyphens",
@@ -806,7 +809,8 @@ impl Config {
             if !task.hotkey.is_empty() && !seen_hotkeys.insert(task.hotkey.clone()) {
                 return Err(anyhow!(
                     "duplicate hotkey '{}' on task '{}'",
-                    task.hotkey, task.id
+                    task.hotkey,
+                    task.id
                 ));
             }
             if task.name.is_empty() || task.name.len() > 128 {
@@ -970,7 +974,11 @@ impl Config {
                             || (!config.upload.sftp.password.is_empty()
                                 && config.upload.sftp.password_encrypted.is_empty())
                             || (!config.upload.sftp.private_key_passphrase.is_empty()
-                                && config.upload.sftp.private_key_passphrase_encrypted.is_empty());
+                                && config
+                                    .upload
+                                    .sftp
+                                    .private_key_passphrase_encrypted
+                                    .is_empty());
                         if needs_secret_migration {
                             config.migrate_secrets();
                             if let Err(e) = config.save() {
@@ -999,9 +1007,7 @@ impl Config {
     fn backup_corrupt_config(path: &Path, content: &str) {
         let mut backup = path.to_path_buf();
         let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
-        let new_name = format!(
-            "config.bad.{stamp}.toml"
-        );
+        let new_name = format!("config.bad.{stamp}.toml");
         backup.set_file_name(new_name);
         // write-then-replace: never delete the user's broken config until
         // the backup has been written successfully.
@@ -1044,9 +1050,7 @@ impl Config {
                     tracing::info!("migrated FTP password into encrypted vault");
                 }
                 Err(e) => {
-                    tracing::warn!(
-                        "FTP password DPAPI encrypt failed; leaving plaintext: {e}"
-                    );
+                    tracing::warn!("FTP password DPAPI encrypt failed; leaving plaintext: {e}");
                 }
             }
         }
@@ -1059,9 +1063,7 @@ impl Config {
                     tracing::info!("migrated SFTP password into encrypted vault");
                 }
                 Err(e) => {
-                    tracing::warn!(
-                        "SFTP password DPAPI encrypt failed; leaving plaintext: {e}"
-                    );
+                    tracing::warn!("SFTP password DPAPI encrypt failed; leaving plaintext: {e}");
                 }
             }
         }

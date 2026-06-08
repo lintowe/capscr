@@ -117,11 +117,15 @@ mod tests {
         let loaded = KnownHosts::load(&path);
         assert_eq!(loaded.hosts.len(), 2);
         assert_eq!(
-            loaded.lookup("sftp.example.com:22").map(|e| e.fingerprint.as_str()),
+            loaded
+                .lookup("sftp.example.com:22")
+                .map(|e| e.fingerprint.as_str()),
             Some("SHA256:abc123")
         );
         assert_eq!(
-            loaded.lookup("other.host:2222").map(|e| e.fingerprint.as_str()),
+            loaded
+                .lookup("other.host:2222")
+                .map(|e| e.fingerprint.as_str()),
             Some("SHA256:def456")
         );
     }

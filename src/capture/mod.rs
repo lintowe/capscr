@@ -1,32 +1,32 @@
 #![allow(dead_code)]
 
-mod screen;
-mod window;
-mod region;
-mod hdr;
-mod hdr_png;
-mod tonemapping;
 mod cursor;
-#[cfg(windows)]
-mod wgc;
 #[cfg(windows)]
 mod d2d_tonemap;
 #[cfg(windows)]
 mod gdi;
-
-pub use screen::ScreenCapture;
-pub use window::WindowCapture;
-pub use region::RegionCapture;
-pub use tonemapping::TonemapParams;
-pub use hdr::HdrCapture;
+mod hdr;
+mod hdr_png;
+mod region;
+mod screen;
+mod tonemapping;
 #[cfg(windows)]
-pub use wgc::capture_at_point as wgc_capture_at_point;
+mod wgc;
+mod window;
+
+pub use cursor::composite_system_cursor;
 #[cfg(windows)]
 pub use d2d_tonemap::capture_hdr_to_sdr_sweep;
 #[cfg(windows)]
 pub use gdi::{fast_gdi_capture, fast_list_monitors};
+pub use hdr::HdrCapture;
 pub use hdr_png::{encode_hdr_png, read_cicp, HdrBitmap, HdrTransfer};
-pub use cursor::composite_system_cursor;
+pub use region::RegionCapture;
+pub use screen::ScreenCapture;
+pub use tonemapping::TonemapParams;
+#[cfg(windows)]
+pub use wgc::capture_at_point as wgc_capture_at_point;
+pub use window::WindowCapture;
 
 use std::sync::OnceLock;
 
@@ -81,7 +81,8 @@ pub fn hdr_aware_enabled() -> bool {
         let forced_on = matches!(raw.trim(), "1" | "true" | "TRUE" | "on");
         tracing::info!(
             "CAPSCR_HDR_AWARE env var = {:?} -> hdr_aware_enabled = {}",
-            raw, forced_on,
+            raw,
+            forced_on,
         );
         forced_on
     })
@@ -94,7 +95,8 @@ pub fn wgc_enabled() -> bool {
         let forced_on = matches!(raw.trim(), "1" | "true" | "TRUE" | "on");
         tracing::info!(
             "CAPSCR_USE_WGC env var = {:?} -> wgc_enabled = {}",
-            raw, forced_on,
+            raw,
+            forced_on,
         );
         forced_on
     })
@@ -113,7 +115,8 @@ pub fn fast_hdr_acquire_enabled() -> bool {
         let forced_on = matches!(raw.trim(), "1" | "true" | "TRUE" | "on");
         tracing::info!(
             "CAPSCR_FAST_HDR env var = {:?} -> fast_hdr_acquire_enabled = {}",
-            raw, forced_on,
+            raw,
+            forced_on,
         );
         forced_on
     })
@@ -202,8 +205,8 @@ pub enum MonitorRotation {
 fn current_monitor_rotation_at(x: i32, y: i32) -> MonitorRotation {
     use windows::Win32::Foundation::POINT;
     use windows::Win32::Graphics::Gdi::{
-        EnumDisplaySettingsW, GetMonitorInfoW, MonitorFromPoint, DEVMODEW,
-        ENUM_CURRENT_SETTINGS, MONITORINFOEXW, MONITORINFO, MONITOR_DEFAULTTONULL,
+        EnumDisplaySettingsW, GetMonitorInfoW, MonitorFromPoint, DEVMODEW, ENUM_CURRENT_SETTINGS,
+        MONITORINFO, MONITORINFOEXW, MONITOR_DEFAULTTONULL,
     };
     unsafe {
         let hmon = MonitorFromPoint(POINT { x, y }, MONITOR_DEFAULTTONULL);
@@ -262,7 +265,12 @@ pub struct Rectangle {
 
 impl Rectangle {
     pub fn new(x: i32, y: i32, width: u32, height: u32) -> Self {
-        Self { x, y, width, height }
+        Self {
+            x,
+            y,
+            width,
+            height,
+        }
     }
 
     #[cfg(any(test, windows))]
@@ -271,7 +279,12 @@ impl Rectangle {
         let y = start_y.min(end_y);
         let width = (start_x - end_x).unsigned_abs();
         let height = (start_y - end_y).unsigned_abs();
-        Self { x, y, width, height }
+        Self {
+            x,
+            y,
+            width,
+            height,
+        }
     }
 }
 
@@ -459,7 +472,10 @@ pub fn capture_one_monitor(monitor: &MonitorInfo) -> Result<RgbaImage> {
     if is_black_frame(&img) {
         tracing::warn!(
             "monitor {}x{}+{}+{} captured all-black — GDI fallback",
-            monitor.width, monitor.height, monitor.x, monitor.y,
+            monitor.width,
+            monitor.height,
+            monitor.x,
+            monitor.y,
         );
         if let Ok(g) = gdi_capture() {
             let g = orient_captured_image(g, monitor.width, monitor.height, monitor.x, monitor.y);
@@ -485,7 +501,6 @@ mod tests {
         assert_eq!(rect.width, 50);
         assert_eq!(rect.height, 100);
     }
-
 
     #[test]
     fn test_screen_capture_with_monitor() {
@@ -584,7 +599,10 @@ mod tests {
             d[2] = s[0];
             d[3] = s[3];
         }
-        assert_eq!(got, want, "parallel output must match the serial swap byte-for-byte");
+        assert_eq!(
+            got, want,
+            "parallel output must match the serial swap byte-for-byte"
+        );
     }
 
     #[test]
@@ -602,6 +620,9 @@ mod tests {
         let mut serial = vec![0u8; px * 4];
         capture_serial(|| par_convert(&src, &mut serial, |s| [s[2], s[1], s[0], 255]));
 
-        assert_eq!(parallel, serial, "capture_serial must not change the output bytes");
+        assert_eq!(
+            parallel, serial,
+            "capture_serial must not change the output bytes"
+        );
     }
 }

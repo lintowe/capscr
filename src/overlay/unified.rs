@@ -22,28 +22,29 @@ mod windows_impl {
             Foundation::{BOOL, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
             Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_EXTENDED_FRAME_BOUNDS},
             Graphics::Gdi::{
-                AlphaBlend, BeginPaint, BitBlt, CreateCompatibleDC,
-                CreatePen, CreateSolidBrush, DeleteDC, DeleteObject, EndPaint, FillRect, GetDC,
-                GetStockObject, InvalidateRect, ReleaseDC, SelectObject, SetBkColor, SetBkMode,
-                SetTextColor, StretchBlt, TextOutW, AC_SRC_OVER, BLENDFUNCTION, HBITMAP, HDC,
-                HOLLOW_BRUSH, OPAQUE, PAINTSTRUCT, PS_SOLID, SRCCOPY, TRANSPARENT, CAPTUREBLT,
-                CreateDIBSection, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS,
-                Rectangle as GdiRectangle, ScreenToClient,
+                AlphaBlend, BeginPaint, BitBlt, CreateCompatibleDC, CreateDIBSection, CreatePen,
+                CreateSolidBrush, DeleteDC, DeleteObject, EndPaint, FillRect, GetDC,
+                GetStockObject, InvalidateRect, Rectangle as GdiRectangle, ReleaseDC,
+                ScreenToClient, SelectObject, SetBkColor, SetBkMode, SetTextColor, StretchBlt,
+                TextOutW, AC_SRC_OVER, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, BLENDFUNCTION,
+                CAPTUREBLT, DIB_RGB_COLORS, HBITMAP, HDC, HOLLOW_BRUSH, OPAQUE, PAINTSTRUCT,
+                PS_SOLID, SRCCOPY, TRANSPARENT,
             },
             System::LibraryLoader::GetModuleHandleW,
             UI::{
-                Input::KeyboardAndMouse::{VK_ESCAPE, VK_RETURN, VK_SPACE, VK_SHIFT, VK_CONTROL},
+                Input::KeyboardAndMouse::{VK_CONTROL, VK_ESCAPE, VK_RETURN, VK_SHIFT, VK_SPACE},
                 WindowsAndMessaging::{
-                    CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, EnumWindows,
-                    GetAncestor, GetCursorPos, GetMessageW, GetSystemMetrics, GetWindowLongW,
-                    GetWindowRect, IsIconic, IsWindowVisible, PostQuitMessage, RegisterClassW,
-                    ShowWindow, TranslateMessage, CS_HREDRAW, CS_VREDRAW, GA_ROOT, GWL_EXSTYLE,
-                    GWL_STYLE, MSG, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN,
-                    SM_YVIRTUALSCREEN, SetForegroundWindow, SW_SHOWNORMAL, WM_DESTROY, WM_KEYDOWN,
-                    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_PAINT, WM_RBUTTONDOWN,
-                    WNDCLASSW, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP, WS_VISIBLE,
-                    SetLayeredWindowAttributes, LWA_ALPHA, LWA_COLORKEY,
-                    ChildWindowFromPointEx, CWP_SKIPINVISIBLE, CWP_SKIPTRANSPARENT,
+                    ChildWindowFromPointEx, CreateWindowExW, DefWindowProcW, DestroyWindow,
+                    DispatchMessageW, EnumWindows, GetAncestor, GetCursorPos, GetMessageW,
+                    GetSystemMetrics, GetWindowLongW, GetWindowRect, IsIconic, IsWindowVisible,
+                    PostQuitMessage, RegisterClassW, SetForegroundWindow,
+                    SetLayeredWindowAttributes, ShowWindow, TranslateMessage, CS_HREDRAW,
+                    CS_VREDRAW, CWP_SKIPINVISIBLE, CWP_SKIPTRANSPARENT, GA_ROOT, GWL_EXSTYLE,
+                    GWL_STYLE, LWA_ALPHA, LWA_COLORKEY, MSG, SM_CXVIRTUALSCREEN,
+                    SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SW_SHOWNORMAL,
+                    WM_DESTROY, WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_PAINT,
+                    WM_RBUTTONDOWN, WNDCLASSW, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
+                    WS_POPUP, WS_VISIBLE,
                 },
             },
         },
@@ -92,18 +93,16 @@ mod windows_impl {
 
     fn ctrl_held() -> bool {
         unsafe {
-            let state = windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(
-                VK_CONTROL.0 as i32,
-            );
+            let state =
+                windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(VK_CONTROL.0 as i32);
             state < 0
         }
     }
 
     fn shift_held() -> bool {
         unsafe {
-            let state = windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(
-                VK_SHIFT.0 as i32,
-            );
+            let state =
+                windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(VK_SHIFT.0 as i32);
             state < 0
         }
     }
@@ -114,11 +113,8 @@ mod windows_impl {
             if !ScreenToClient(parent, &mut client_pt).as_bool() {
                 return parent;
             }
-            let child = ChildWindowFromPointEx(
-                parent,
-                client_pt,
-                CWP_SKIPINVISIBLE | CWP_SKIPTRANSPARENT,
-            );
+            let child =
+                ChildWindowFromPointEx(parent, client_pt, CWP_SKIPINVISIBLE | CWP_SKIPTRANSPARENT);
             if child.0.is_null() || child == parent {
                 parent
             } else {
@@ -345,14 +341,7 @@ mod windows_impl {
 
         let mut bits_ptr: *mut std::ffi::c_void = std::ptr::null_mut();
         let hbmp = unsafe {
-            CreateDIBSection(
-                HDC::default(),
-                &bi,
-                DIB_RGB_COLORS,
-                &mut bits_ptr,
-                None,
-                0,
-            )
+            CreateDIBSection(HDC::default(), &bi, DIB_RGB_COLORS, &mut bits_ptr, None, 0)
         }
         .ok()?;
 
@@ -435,17 +424,8 @@ mod windows_impl {
             ..Default::default()
         };
         let mut bits_ptr: *mut std::ffi::c_void = std::ptr::null_mut();
-        unsafe {
-            CreateDIBSection(
-                HDC::default(),
-                &bi,
-                DIB_RGB_COLORS,
-                &mut bits_ptr,
-                None,
-                0,
-            )
-        }
-        .ok()
+        unsafe { CreateDIBSection(HDC::default(), &bi, DIB_RGB_COLORS, &mut bits_ptr, None, 0) }
+            .ok()
     }
 
     pub fn select(frozen_frame: Option<std::sync::Arc<image::RgbaImage>>) -> SelectionResult {
@@ -495,16 +475,33 @@ mod windows_impl {
                     if let Some(hbmp) = create_gdi_bitmap_from_image(frozen) {
                         (hbmp, false)
                     } else {
-                        (create_32bpp_dib(virt_width, virt_height).unwrap_or_default(), true)
+                        (
+                            create_32bpp_dib(virt_width, virt_height).unwrap_or_default(),
+                            true,
+                        )
                     }
                 } else {
-                    (create_32bpp_dib(virt_width, virt_height).unwrap_or_default(), true)
+                    (
+                        create_32bpp_dib(virt_width, virt_height).unwrap_or_default(),
+                        true,
+                    )
                 };
 
                 if !bitmap.is_invalid() {
                     let old_bitmap = SelectObject(mem_dc, bitmap);
                     if needs_bitblt {
-                        BitBlt(mem_dc, 0, 0, virt_width, virt_height, screen_dc, virt_x, virt_y, windows::Win32::Graphics::Gdi::ROP_CODE(SRCCOPY.0 | CAPTUREBLT.0)).ok();
+                        BitBlt(
+                            mem_dc,
+                            0,
+                            0,
+                            virt_width,
+                            virt_height,
+                            screen_dc,
+                            virt_x,
+                            virt_y,
+                            windows::Win32::Graphics::Gdi::ROP_CODE(SRCCOPY.0 | CAPTUREBLT.0),
+                        )
+                        .ok();
                     }
 
                     // build the dim layer once, used per-frame during drag to
@@ -532,7 +529,17 @@ mod windows_impl {
                         if !dim_dc.is_invalid() && !dim_bmp.is_invalid() {
                             let old_dim = SelectObject(dim_dc, dim_bmp);
                             // start with a copy of the screen (mem_dc currently has bitmap selected)
-                            let _ = BitBlt(dim_dc, 0, 0, virt_width, virt_height, mem_dc, 0, 0, SRCCOPY);
+                            let _ = BitBlt(
+                                dim_dc,
+                                0,
+                                0,
+                                virt_width,
+                                virt_height,
+                                mem_dc,
+                                0,
+                                0,
+                                SRCCOPY,
+                            );
                             // darken via one AlphaBlend at startup (62% black overlay).
                             // amortised across the lifetime of the selector instead
                             // of paying it on every WM_PAINT.
@@ -540,8 +547,15 @@ mod windows_impl {
                             let dim_brush_bmp = create_32bpp_dib(1, 1).unwrap_or_default();
                             if !dim_brush_dc.is_invalid() && !dim_brush_bmp.is_invalid() {
                                 let old_db = SelectObject(dim_brush_dc, dim_brush_bmp);
-                                let black = CreateSolidBrush(windows::Win32::Foundation::COLORREF(0x00000000));
-                                let full = RECT { left: 0, top: 0, right: 1, bottom: 1 };
+                                let black = CreateSolidBrush(windows::Win32::Foundation::COLORREF(
+                                    0x00000000,
+                                ));
+                                let full = RECT {
+                                    left: 0,
+                                    top: 0,
+                                    right: 1,
+                                    bottom: 1,
+                                };
                                 FillRect(dim_brush_dc, &full, black);
                                 let _ = DeleteObject(black);
                                 let blend = BLENDFUNCTION {
@@ -551,8 +565,16 @@ mod windows_impl {
                                     AlphaFormat: 0,
                                 };
                                 let _ = AlphaBlend(
-                                    dim_dc, 0, 0, virt_width, virt_height,
-                                    dim_brush_dc, 0, 0, 1, 1,
+                                    dim_dc,
+                                    0,
+                                    0,
+                                    virt_width,
+                                    virt_height,
+                                    dim_brush_dc,
+                                    0,
+                                    0,
+                                    1,
+                                    1,
                                     blend,
                                 );
                                 SelectObject(dim_brush_dc, old_db);
@@ -800,22 +822,18 @@ mod windows_impl {
                     if let Some(bmp) = *DIM_BITMAP.lock().unwrap() {
                         let dim_dc = HDC(dc as *mut _);
                         let old_bmp = SelectObject(dim_dc, HBITMAP(bmp as *mut _));
-                        let _ = BitBlt(
-                            back_dc,
-                            0,
-                            0,
-                            width,
-                            height,
-                            dim_dc,
-                            0,
-                            0,
-                            SRCCOPY,
-                        );
+                        let _ = BitBlt(back_dc, 0, 0, width, height, dim_dc, 0, 0, SRCCOPY);
                         SelectObject(dim_dc, old_bmp);
                     }
                 } else {
-                    let black_brush = CreateSolidBrush(windows::Win32::Foundation::COLORREF(0x00000000));
-                    let full = RECT { left: 0, top: 0, right: width, bottom: height };
+                    let black_brush =
+                        CreateSolidBrush(windows::Win32::Foundation::COLORREF(0x00000000));
+                    let full = RECT {
+                        left: 0,
+                        top: 0,
+                        right: width,
+                        bottom: height,
+                    };
                     FillRect(back_dc, &full, black_brush);
                     let _ = DeleteObject(black_brush);
                 }
@@ -849,7 +867,8 @@ mod windows_impl {
                     }
                 }
 
-                let is_dragging = mouse_down && ((ex - sx).abs() > CLICK_THRESHOLD || (ey - sy).abs() > CLICK_THRESHOLD);
+                let is_dragging = mouse_down
+                    && ((ex - sx).abs() > CLICK_THRESHOLD || (ey - sy).abs() > CLICK_THRESHOLD);
 
                 if is_dragging {
                     let left = (sx.min(ex)) - virt_x;
@@ -875,14 +894,25 @@ mod windows_impl {
                             SelectObject(mem_dc, old_bmp);
                         }
                     } else {
-                        let key_brush = CreateSolidBrush(windows::Win32::Foundation::COLORREF(OVERLAY_COLORKEY));
-                        let sel_rect = RECT { left, top, right, bottom };
+                        let key_brush = CreateSolidBrush(windows::Win32::Foundation::COLORREF(
+                            OVERLAY_COLORKEY,
+                        ));
+                        let sel_rect = RECT {
+                            left,
+                            top,
+                            right,
+                            bottom,
+                        };
                         FillRect(back_dc, &sel_rect, key_brush);
                         let _ = DeleteObject(key_brush);
                     }
 
                     // 1px solid white selection border — greyscale, no chroma.
-                    let border_pen = CreatePen(PS_SOLID, 1, windows::Win32::Foundation::COLORREF(0x00FFFFFF));
+                    let border_pen = CreatePen(
+                        PS_SOLID,
+                        1,
+                        windows::Win32::Foundation::COLORREF(0x00FFFFFF),
+                    );
 
                     let old_pen = SelectObject(back_dc, border_pen);
                     let hollow = GetStockObject(HOLLOW_BRUSH);
@@ -949,7 +979,11 @@ mod windows_impl {
                             // 1px white outline only — no fill. the previous 12%-alpha
                             // white wash inside the hovered window made bright UI look
                             // hazy and made the cursor target less obvious.
-                            let pen = CreatePen(PS_SOLID, 1, windows::Win32::Foundation::COLORREF(0x00FFFFFF));
+                            let pen = CreatePen(
+                                PS_SOLID,
+                                1,
+                                windows::Win32::Foundation::COLORREF(0x00FFFFFF),
+                            );
                             let old_pen = SelectObject(back_dc, pen);
                             let hollow = GetStockObject(HOLLOW_BRUSH);
                             let old_brush = SelectObject(back_dc, hollow);
@@ -968,18 +1002,32 @@ mod windows_impl {
                 let cursor_y = CURSOR_Y.load(Ordering::SeqCst) - virt_y;
 
                 if cursor_x >= 0 && cursor_x < width && cursor_y >= 0 && cursor_y < height {
-                    let crosshair_pen = CreatePen(PS_SOLID, 1, windows::Win32::Foundation::COLORREF(0x00808080));
+                    let crosshair_pen = CreatePen(
+                        PS_SOLID,
+                        1,
+                        windows::Win32::Foundation::COLORREF(0x00808080),
+                    );
                     let old_pen = SelectObject(back_dc, crosshair_pen);
                     SetBkMode(back_dc, TRANSPARENT);
 
                     let _ = windows::Win32::Graphics::Gdi::MoveToEx(back_dc, 0, cursor_y, None);
                     let _ = windows::Win32::Graphics::Gdi::LineTo(back_dc, cursor_x - 20, cursor_y);
-                    let _ = windows::Win32::Graphics::Gdi::MoveToEx(back_dc, cursor_x + 20, cursor_y, None);
+                    let _ = windows::Win32::Graphics::Gdi::MoveToEx(
+                        back_dc,
+                        cursor_x + 20,
+                        cursor_y,
+                        None,
+                    );
                     let _ = windows::Win32::Graphics::Gdi::LineTo(back_dc, width, cursor_y);
 
                     let _ = windows::Win32::Graphics::Gdi::MoveToEx(back_dc, cursor_x, 0, None);
                     let _ = windows::Win32::Graphics::Gdi::LineTo(back_dc, cursor_x, cursor_y - 20);
-                    let _ = windows::Win32::Graphics::Gdi::MoveToEx(back_dc, cursor_x, cursor_y + 20, None);
+                    let _ = windows::Win32::Graphics::Gdi::MoveToEx(
+                        back_dc,
+                        cursor_x,
+                        cursor_y + 20,
+                        None,
+                    );
                     let _ = windows::Win32::Graphics::Gdi::LineTo(back_dc, cursor_x, height);
 
                     SelectObject(back_dc, old_pen);
@@ -992,33 +1040,66 @@ mod windows_impl {
 
                             let mag_x = cursor_x + 30;
                             let mag_y = cursor_y + 30;
-                            let mag_x = if mag_x + MAGNIFIER_SIZE > width { cursor_x - MAGNIFIER_SIZE - 30 } else { mag_x };
-                            let mag_y = if mag_y + MAGNIFIER_SIZE > height { cursor_y - MAGNIFIER_SIZE - 30 } else { mag_y };
+                            let mag_x = if mag_x + MAGNIFIER_SIZE > width {
+                                cursor_x - MAGNIFIER_SIZE - 30
+                            } else {
+                                mag_x
+                            };
+                            let mag_y = if mag_y + MAGNIFIER_SIZE > height {
+                                cursor_y - MAGNIFIER_SIZE - 30
+                            } else {
+                                mag_y
+                            };
 
                             let src_size = MAGNIFIER_SIZE / MAGNIFIER_ZOOM;
                             let src_x = (cursor_x - src_size / 2).max(0).min(width - src_size);
                             let src_y = (cursor_y - src_size / 2).max(0).min(height - src_size);
 
                             let _ = StretchBlt(
-                                back_dc, mag_x, mag_y, MAGNIFIER_SIZE, MAGNIFIER_SIZE,
-                                mem_dc, src_x, src_y, src_size, src_size, SRCCOPY
+                                back_dc,
+                                mag_x,
+                                mag_y,
+                                MAGNIFIER_SIZE,
+                                MAGNIFIER_SIZE,
+                                mem_dc,
+                                src_x,
+                                src_y,
+                                src_size,
+                                src_size,
+                                SRCCOPY,
                             );
 
                             SelectObject(mem_dc, old_bmp);
 
-                            let border_pen = CreatePen(PS_SOLID, 1, windows::Win32::Foundation::COLORREF(0x00FFFFFF));
+                            let border_pen = CreatePen(
+                                PS_SOLID,
+                                1,
+                                windows::Win32::Foundation::COLORREF(0x00FFFFFF),
+                            );
                             let old_pen = SelectObject(back_dc, border_pen);
                             let hollow = GetStockObject(HOLLOW_BRUSH);
                             let old_brush = SelectObject(back_dc, hollow);
-                            let _ = GdiRectangle(back_dc, mag_x, mag_y, mag_x + MAGNIFIER_SIZE, mag_y + MAGNIFIER_SIZE);
+                            let _ = GdiRectangle(
+                                back_dc,
+                                mag_x,
+                                mag_y,
+                                mag_x + MAGNIFIER_SIZE,
+                                mag_y + MAGNIFIER_SIZE,
+                            );
 
-                            let center_pen = CreatePen(PS_SOLID, 1, windows::Win32::Foundation::COLORREF(0x00808080));
+                            let center_pen = CreatePen(
+                                PS_SOLID,
+                                1,
+                                windows::Win32::Foundation::COLORREF(0x00808080),
+                            );
                             SelectObject(back_dc, center_pen);
                             let cx = mag_x + MAGNIFIER_SIZE / 2;
                             let cy = mag_y + MAGNIFIER_SIZE / 2;
-                            let _ = windows::Win32::Graphics::Gdi::MoveToEx(back_dc, cx - 10, cy, None);
+                            let _ =
+                                windows::Win32::Graphics::Gdi::MoveToEx(back_dc, cx - 10, cy, None);
                             let _ = windows::Win32::Graphics::Gdi::LineTo(back_dc, cx + 10, cy);
-                            let _ = windows::Win32::Graphics::Gdi::MoveToEx(back_dc, cx, cy - 10, None);
+                            let _ =
+                                windows::Win32::Graphics::Gdi::MoveToEx(back_dc, cx, cy - 10, None);
                             let _ = windows::Win32::Graphics::Gdi::LineTo(back_dc, cx, cy + 10);
 
                             SelectObject(back_dc, old_pen);
@@ -1211,14 +1292,7 @@ mod windows_impl {
 
         let mut bits_ptr: *mut std::ffi::c_void = std::ptr::null_mut();
         let hbmp = unsafe {
-            CreateDIBSection(
-                HDC::default(),
-                &bi,
-                DIB_RGB_COLORS,
-                &mut bits_ptr,
-                None,
-                0,
-            )
+            CreateDIBSection(HDC::default(), &bi, DIB_RGB_COLORS, &mut bits_ptr, None, 0)
         }
         .ok()?;
         if hbmp.is_invalid() || bits_ptr.is_null() {

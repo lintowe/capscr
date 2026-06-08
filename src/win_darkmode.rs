@@ -29,22 +29,19 @@ type FlushMenuThemesFn = unsafe extern "system" fn();
 
 pub fn enable_dark_menus() {
     unsafe {
-        let module: HMODULE =
-            match LoadLibraryW(windows::core::w!("uxtheme.dll")) {
-                Ok(h) => h,
-                Err(e) => {
-                    tracing::debug!("uxtheme.dll load failed: {e}");
-                    return;
-                }
-            };
+        let module: HMODULE = match LoadLibraryW(windows::core::w!("uxtheme.dll")) {
+            Ok(h) => h,
+            Err(e) => {
+                tracing::debug!("uxtheme.dll load failed: {e}");
+                return;
+            }
+        };
 
         // ordinal 135 is SetPreferredAppMode on 1903+; older builds export
         // ordinal 135 as AllowDarkModeForApp (BOOL), which we don't bother
         // calling — Win10 pre-1903 just gets light menus.
-        let set_mode_addr =
-            GetProcAddress(module, PCSTR(135 as *const u8));
-        let flush_addr =
-            GetProcAddress(module, s!("FlushMenuThemes"));
+        let set_mode_addr = GetProcAddress(module, PCSTR(135 as *const u8));
+        let flush_addr = GetProcAddress(module, s!("FlushMenuThemes"));
 
         if let Some(set_mode_addr) = set_mode_addr {
             let set_mode: SetPreferredAppModeFn = std::mem::transmute(set_mode_addr);

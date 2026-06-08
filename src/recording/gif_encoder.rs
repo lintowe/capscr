@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::capture::{Capture, Rectangle, ScreenCapture, MonitorInfo};
+use crate::capture::{Capture, MonitorInfo, Rectangle, ScreenCapture};
 
 fn find_best_monitor(rect: Rectangle) -> Option<MonitorInfo> {
     let monitors = crate::capture::fast_list_monitors().ok()?;
@@ -186,7 +186,8 @@ impl GifRecorder {
                             if w == 0 || h == 0 {
                                 Err(anyhow!("Invalid region"))
                             } else {
-                                Ok(image::imageops::crop_imm(&img, local_x, local_y, w, h).to_image())
+                                Ok(image::imageops::crop_imm(&img, local_x, local_y, w, h)
+                                    .to_image())
                             }
                         }
                         Err(_) => {
@@ -213,7 +214,12 @@ impl GifRecorder {
                             let scale = scale_w.min(scale_h);
                             let new_w = ((img.width() as f32) * scale) as u32;
                             let new_h = ((img.height() as f32) * scale) as u32;
-                            image::imageops::resize(&img, new_w.max(1), new_h.max(1), image::imageops::FilterType::Triangle)
+                            image::imageops::resize(
+                                &img,
+                                new_w.max(1),
+                                new_h.max(1),
+                                image::imageops::FilterType::Triangle,
+                            )
                         } else {
                             img
                         }
@@ -337,18 +343,12 @@ impl GifRecorder {
 
         for i in (0..num_frames).step_by(sample_step) {
             let captured = &frames[i];
-            let resized = if captured.image.width() != orig_width
-                || captured.image.height() != orig_height
-            {
-                image::imageops::resize(
-                    &captured.image,
-                    orig_width,
-                    orig_height,
-                    filter,
-                )
-            } else {
-                captured.image.clone()
-            };
+            let resized =
+                if captured.image.width() != orig_width || captured.image.height() != orig_height {
+                    image::imageops::resize(&captured.image, orig_width, orig_height, filter)
+                } else {
+                    captured.image.clone()
+                };
 
             let rgba = resized.as_raw();
             let total_pixels = resized.width() * resized.height();
@@ -385,12 +385,7 @@ impl GifRecorder {
                 let resized = if captured.image.width() != orig_width
                     || captured.image.height() != orig_height
                 {
-                    image::imageops::resize(
-                        &captured.image,
-                        orig_width,
-                        orig_height,
-                        filter,
-                    )
+                    image::imageops::resize(&captured.image, orig_width, orig_height, filter)
                 } else {
                     captured.image.clone()
                 };
@@ -490,14 +485,22 @@ impl GifRecorder {
         // spawn ffmpeg child process and write raw rgba video frames to stdin
         let mut child = std::process::Command::new("ffmpeg")
             .args([
-                "-f", "rawvideo",
-                "-pix_fmt", "rgba",
-                "-s", &format!("{}x{}", orig_width, orig_height),
-                "-r", &fps.to_string(),
-                "-i", "-",
-                "-c:v", "libx264",
-                "-pix_fmt", "yuv420p",
-                "-crf", "23",
+                "-f",
+                "rawvideo",
+                "-pix_fmt",
+                "rgba",
+                "-s",
+                &format!("{}x{}", orig_width, orig_height),
+                "-r",
+                &fps.to_string(),
+                "-i",
+                "-",
+                "-c:v",
+                "libx264",
+                "-pix_fmt",
+                "yuv420p",
+                "-crf",
+                "23",
                 "-y",
                 &path.to_string_lossy(),
             ])
@@ -509,28 +512,30 @@ impl GifRecorder {
 
         {
             use std::io::Write;
-            let mut stdin = child.stdin.take().ok_or_else(|| anyhow!("Failed to open ffmpeg stdin"))?;
+            let mut stdin = child
+                .stdin
+                .take()
+                .ok_or_else(|| anyhow!("Failed to open ffmpeg stdin"))?;
 
             for captured in frames.iter() {
                 let resized = if captured.image.width() != orig_width
                     || captured.image.height() != orig_height
                 {
-                    image::imageops::resize(
-                        &captured.image,
-                        orig_width,
-                        orig_height,
-                        filter,
-                    )
+                    image::imageops::resize(&captured.image, orig_width, orig_height, filter)
                 } else {
                     captured.image.clone()
                 };
 
                 let rgba_data = resized.as_raw();
-                stdin.write_all(rgba_data).map_err(|e| anyhow!("Failed to write to ffmpeg stdin: {}", e))?;
+                stdin
+                    .write_all(rgba_data)
+                    .map_err(|e| anyhow!("Failed to write to ffmpeg stdin: {}", e))?;
             }
         } // stdin is closed here, signaling eof to ffmpeg
 
-        let status = child.wait().map_err(|e| anyhow!("Failed to wait for ffmpeg: {}", e))?;
+        let status = child
+            .wait()
+            .map_err(|e| anyhow!("Failed to wait for ffmpeg: {}", e))?;
         if !status.success() {
             return Err(anyhow!("ffmpeg exited with error status: {}", status));
         }

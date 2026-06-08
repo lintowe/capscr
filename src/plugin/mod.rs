@@ -132,7 +132,10 @@ impl PluginManager {
     fn load_one(&mut self, dir: &Path) -> Result<(), anyhow::Error> {
         let manifest = PluginManifest::load(dir)?;
         if !manifest.enabled {
-            tracing::info!("plugin '{}' disabled; not instantiating", manifest.plugin.id);
+            tracing::info!(
+                "plugin '{}' disabled; not instantiating",
+                manifest.plugin.id
+            );
             return Ok(()); // user toggled it off — must not execute its code
         }
         if !manifest.is_wasm() {

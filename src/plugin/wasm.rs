@@ -167,8 +167,7 @@ impl WasmHost {
         // rely on the feature-gate defaults rather than calling the
         // (removed-in-v43) wasm_threads / wasm_reference_types setters
 
-        let engine = Engine::new(&cfg)
-            .map_err(|e| anyhow!("wasmtime engine init: {e}"))?;
+        let engine = Engine::new(&cfg).map_err(|e| anyhow!("wasmtime engine init: {e}"))?;
 
         // background bumper: increments the engine epoch every 10ms so
         // plugins that exceed their per-hook deadline trap promptly. one
@@ -185,11 +184,7 @@ impl WasmHost {
         Ok(Self { engine })
     }
 
-    pub fn load(
-        &self,
-        plugin_dir: &Path,
-        manifest: &PluginManifest,
-    ) -> Result<WasmPlugin> {
+    pub fn load(&self, plugin_dir: &Path, manifest: &PluginManifest) -> Result<WasmPlugin> {
         let runtime = manifest
             .runtime
             .as_ref()
@@ -244,7 +239,9 @@ impl WasmHost {
                     let start = ptr as usize;
                     let end = start.saturating_add(len as usize);
                     let msg = if end <= data.len() {
-                        std::str::from_utf8(&data[start..end]).unwrap_or("<utf-8 err>").to_string()
+                        std::str::from_utf8(&data[start..end])
+                            .unwrap_or("<utf-8 err>")
+                            .to_string()
                     } else {
                         String::from("<oob log>")
                     };
@@ -703,7 +700,10 @@ fn load_plugin_config(plugin_dir: &Path) -> std::collections::HashMap<String, St
         Err(_) => return out, // no config file is the common case
     };
     if meta.len() > MAX_CONFIG_BYTES {
-        tracing::warn!("plugin config.toml at {} exceeds cap; ignoring", path.display());
+        tracing::warn!(
+            "plugin config.toml at {} exceeds cap; ignoring",
+            path.display()
+        );
         return out;
     }
     let raw = match std::fs::read_to_string(&path) {
@@ -774,7 +774,9 @@ fn read_guest_str(caller: &mut Caller<'_, HostState>, ptr: i32, len: i32) -> Opt
     if end > data.len() {
         return None;
     }
-    std::str::from_utf8(&data[start..end]).ok().map(str::to_owned)
+    std::str::from_utf8(&data[start..end])
+        .ok()
+        .map(str::to_owned)
 }
 
 /// blocking HTTP(S) GET behind the same SSRF guard the upload path uses.
@@ -804,7 +806,9 @@ fn host_request(
     if parsed.scheme() != "https" {
         return Err(anyhow!("only https is allowed (got {})", parsed.scheme()));
     }
-    let host = parsed.host_str().ok_or_else(|| anyhow!("url has no host"))?;
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| anyhow!("url has no host"))?;
     let port = parsed.port().unwrap_or(443);
     if FETCH_BLOCKED_PORTS.contains(&port) {
         return Err(anyhow!("port {port} is blocked"));
@@ -856,7 +860,10 @@ fn write_guest_response(caller: &mut Caller<'_, HostState>, body: &[u8]) -> i64 
         return 0;
     }
     let len = body.len() as i32;
-    let alloc = match caller.get_export("capscr_alloc").and_then(|e| e.into_func()) {
+    let alloc = match caller
+        .get_export("capscr_alloc")
+        .and_then(|e| e.into_func())
+    {
         Some(f) => f,
         None => return 0,
     };
@@ -936,15 +943,27 @@ mod tests {
         let err = host_request(HttpMethod::Get, "http://example.com/", None, None, SECOND)
             .unwrap_err()
             .to_string();
-        assert!(err.contains("https"), "expected https rejection, got: {err}");
+        assert!(
+            err.contains("https"),
+            "expected https rejection, got: {err}"
+        );
     }
 
     #[test]
     fn host_request_rejects_blocked_port() {
-        let err = host_request(HttpMethod::Get, "https://example.com:22/", None, None, SECOND)
-            .unwrap_err()
-            .to_string();
-        assert!(err.contains("port"), "expected blocked-port rejection, got: {err}");
+        let err = host_request(
+            HttpMethod::Get,
+            "https://example.com:22/",
+            None,
+            None,
+            SECOND,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            err.contains("port"),
+            "expected blocked-port rejection, got: {err}"
+        );
     }
 
     #[test]
@@ -1376,7 +1395,9 @@ mod tests {
         };
         let host = WasmHost::new().expect("host");
         let plugin = host.load(dir.path(), &manifest).expect("load");
-        plugin.call_hook("on_capture_saved", "x").expect("hook runs");
+        plugin
+            .call_hook("on_capture_saved", "x")
+            .expect("hook runs");
         let guard = plugin.store.lock().unwrap();
         let mem = plugin.memory.data(&*guard);
         let packed = i64::from_le_bytes(mem[0..8].try_into().unwrap());
@@ -1417,11 +1438,17 @@ mod tests {
         // ptr+len overflows usize
         assert!(read_capture_image(&v, usize::MAX, 8).is_none(), "overflow");
         // zero dimension
-        assert!(read_capture_image(&img_blob(0, 1, &[]), 0, 8).is_none(), "w=0");
+        assert!(
+            read_capture_image(&img_blob(0, 1, &[]), 0, 8).is_none(),
+            "w=0"
+        );
         // dimension exceeds MAX_CAPTURE_DIM (caught before the len check, so the
         // buffer only needs the 8-byte header)
         let big = img_blob(MAX_CAPTURE_DIM + 1, 1, &[]);
-        assert!(read_capture_image(&big, 0, big.len()).is_none(), "w>max dim");
+        assert!(
+            read_capture_image(&big, 0, big.len()).is_none(),
+            "w>max dim"
+        );
         // length doesn't match 8 + w*h*4 (claims 2x2 = 24 bytes, supplies 12)
         let mismatch = img_blob(2, 2, &[0, 0, 0, 0]);
         assert!(
