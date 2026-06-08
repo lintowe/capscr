@@ -11,7 +11,8 @@ import { Settings } from "./views/Settings";
 import { History } from "./views/History";
 import { Destinations } from "./views/Destinations";
 import { Tasks } from "./views/Tasks";
-import { config, refetchConfig } from "./store";
+import { config, refetchConfig, mutateConfig } from "./store";
+import { HotkeyInput } from "./components/HotkeyInput";
 
 // lazy-loaded so the hub bundle doesn't ship the full canvas editor and the
 // editor window doesn't ship the hub. Editor is a named export, so adapt it to
@@ -62,6 +63,13 @@ export function App() {
 }
 
 function Hub() {
+  const needsOnboarding = () => {
+    const c = config();
+    if (!c) return false;
+    const task = c.capture_tasks.find((t) => t.id === "screenshot-save-clipboard");
+    return task && !task.hotkey;
+  };
+
   // open to history by default — "what just happened" is the expected view;
   // settings is buried behind a tab click.
   const historyTab = TABS.find((t) => t.id === "history") ?? TABS[0];
@@ -290,6 +298,42 @@ function Hub() {
   return (
     <div class="app">
       <Titlebar context={tab().context} onClose={onClose} />
+
+      <Show when={needsOnboarding()}>
+        <div class="onboarding-overlay">
+          <div class="onboarding-card">
+            <h2>welcome to capscr</h2>
+            <p class="lede">let's set up your screenshot shortcut key first</p>
+            <p class="desc">
+              not every keyboard has a PrintScreen key. click the box below and press any key combination (e.g. PrintScreen, Ctrl+Alt+S, Alt+Shift+A) to bind it.
+            </p>
+            <div style="margin: 24px 0 12px 0; width: 280px; align-self: center;">
+              <HotkeyInput
+                value=""
+                onChange={async (nextHotkey) => {
+                  if (!nextHotkey) return;
+                  const c = config();
+                  if (!c) return;
+                  const index = c.capture_tasks.findIndex((t) => t.id === "screenshot-save-clipboard");
+                  if (index !== -1) {
+                    const next = [...c.capture_tasks];
+                    next[index] = { ...next[index], hotkey: nextHotkey };
+                    const nextConfig = { ...c, capture_tasks: next };
+                    mutateConfig(nextConfig);
+                    try {
+                      await api.setConfig(nextConfig);
+                      setConfigDirty(false);
+                      pushToast("config", "screenshot hotkey bound successfully");
+                    } catch (e) {
+                      pushToast("config", `failed to save: ${e}`);
+                    }
+                  }
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      </Show>
 
       <aside class="sidebar">
         <div class="sidebar-label">

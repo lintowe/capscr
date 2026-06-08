@@ -1874,3 +1874,48 @@ kbd {
     opacity: 1 !important;
   }
 }
+
+/* ---------------- onboarding ---------------- */
+
+.onboarding-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(13, 13, 13, 0.95);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: drop-in 200ms var(--easing);
+}
+
+.onboarding-card {
+  width: 420px;
+  background: var(--ink-2);
+  border: 1px solid var(--rule);
+  padding: 32px;
+  display: flex;
+  flex-direction: column;
+  text-align: center;
+}
+
+.onboarding-card h2 {
+  font-size: 20px;
+  color: var(--paper);
+  margin: 0 0 12px 0;
+  font-weight: normal;
+  letter-spacing: var(--tracked-wide);
+  text-transform: uppercase;
+}
+
+.onboarding-card .lede {
+  font-size: 13px;
+  color: var(--text-2);
+  margin: 0 0 16px 0;
+}
+
+.onboarding-card .desc {
+  font-size: 11px;
+  color: var(--mute);
+  margin: 0 0 24px 0;
+  line-height: 1.5;
+}

@@ -115,7 +115,7 @@ fn default_capture_tasks() -> Vec<CaptureTask> {
         CaptureTask {
             id: "screenshot-save-clipboard".to_string(),
             name: "Screenshot — save + clipboard".to_string(),
-            hotkey: "PrintScreen".to_string(),
+            hotkey: "".to_string(),
             capture_mode: TaskCaptureMode::Region,
             post_action: TaskPostAction::SaveAndClipboard,
             target_destination: None,
