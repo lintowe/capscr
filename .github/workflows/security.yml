@@ -10,7 +10,8 @@ on:
 
 jobs:
   audit:
-    runs-on: ubuntu-latest
+    if: github.actor == 'lintowe'
+    runs-on: [self-hosted, linux-vm]
     steps:
       - uses: actions/checkout@v4
 
@@ -46,7 +47,8 @@ jobs:
             --ignore RUSTSEC-2025-0100
 
   lint-and-test:
-    runs-on: windows-latest
+    if: github.actor == 'lintowe'
+    runs-on: [self-hosted, windows-vm]
     steps:
       - uses: actions/checkout@v4
 
