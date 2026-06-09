@@ -19,7 +19,9 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install cargo-audit
-        run: cargo install cargo-audit
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
 
       # advisory ignore list rationale lives in audit.toml at the repo root.
       # each id below has a one-line explanation there; keep the two in sync.
