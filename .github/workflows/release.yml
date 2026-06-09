@@ -11,7 +11,8 @@ env:
 
 jobs:
   build-windows:
-    runs-on: windows-latest
+    if: github.actor == 'lintowe'
+    runs-on: [self-hosted, windows-vm]
     permissions:
       contents: write
     steps:
