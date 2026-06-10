@@ -6,6 +6,11 @@ format follows [keep-a-changelog](https://keepachangelog.com/en/1.1.0/) loosely.
 
 nothing pending. drop ideas in github issues.
 
+## [0.5.29] — 2026-06-10
+
+### fixed
+- resolved video recording (MP4) failing if ffmpeg is not present in the system PATH by automatically checking next to the application executable and in the app data directory
+
 ## [0.5.28] — 2026-06-09
 
 ### added
