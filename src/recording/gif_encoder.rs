@@ -483,7 +483,7 @@ impl GifRecorder {
         };
 
         // spawn ffmpeg child process and write raw rgba video frames to stdin
-        let mut child = std::process::Command::new("ffmpeg")
+        let mut child = std::process::Command::new(find_ffmpeg())
             .args([
                 "-f",
                 "rawvideo",
@@ -552,6 +552,34 @@ impl GifRecorder {
             *state = RecordingState::Idle;
         }
     }
+}
+
+fn find_ffmpeg() -> std::path::PathBuf {
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(parent) = exe_path.parent() {
+            let local_ffmpeg = parent.join("ffmpeg.exe");
+            if local_ffmpeg.exists() {
+                return local_ffmpeg;
+            }
+            let local_ffmpeg_no_ext = parent.join("ffmpeg");
+            if local_ffmpeg_no_ext.exists() {
+                return local_ffmpeg_no_ext;
+            }
+        }
+    }
+
+    if let Some(proj_dirs) = directories::ProjectDirs::from("com", "capscr", "capscr") {
+        let app_data_ffmpeg = proj_dirs.data_dir().join("ffmpeg.exe");
+        if app_data_ffmpeg.exists() {
+            return app_data_ffmpeg;
+        }
+        let app_data_ffmpeg_no_ext = proj_dirs.data_dir().join("ffmpeg");
+        if app_data_ffmpeg_no_ext.exists() {
+            return app_data_ffmpeg_no_ext;
+        }
+    }
+
+    std::path::PathBuf::from("ffmpeg")
 }
 
 impl Default for GifRecorder {
