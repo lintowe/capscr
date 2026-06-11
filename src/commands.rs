@@ -1389,6 +1389,10 @@ pub fn open_editor_window(app: &AppHandle, image_path: &str) -> tauri::Result<()
         let _ = window.show();
         let _ = window.set_focus();
         let _ = window.emit("capscr://editor-load", image_path.to_string());
+        // the reused window may be a leftover that never loaded (about:blank);
+        // heal it the same way as a fresh one — once the page boots it pulls
+        // the current path via get_editor_image_path
+        watch_editor_navigation(app, window);
         return Ok(());
     }
     let url = tauri::WebviewUrl::App("index.html".into());
@@ -1404,12 +1408,45 @@ pub fn open_editor_window(app: &AppHandle, image_path: &str) -> tauri::Result<()
         builder = builder.icon(icon)?;
     }
 
-    let _window = builder.build()?;
+    let window = builder.build()?;
+    watch_editor_navigation(app, window);
     Ok(())
+}
+
+// dynamically created webview windows sometimes come up on about:blank instead
+// of loading the app url (tauri#13967). The page never renders, and because the
+// editor is undecorated there's no native close button either — the user is
+// stuck with a dead white window. Probe the webview shortly after creation and
+// navigate explicitly when that happens. The hub window is prewarmed at startup
+// and never destroyed, so its url is the canonical app url to copy.
+fn watch_editor_navigation(app: &AppHandle, window: tauri::WebviewWindow) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        for wait_ms in [500u64, 1500, 3000] {
+            std::thread::sleep(std::time::Duration::from_millis(wait_ms));
+            let on_blank = window.url().map(|u| u.scheme() == "about").unwrap_or(false);
+            if !on_blank {
+                return;
+            }
+            tracing::warn!("editor webview stuck on about:blank; navigating explicitly");
+            let target = app
+                .get_webview_window(HUB_LABEL)
+                .and_then(|hub| hub.url().ok());
+            if let Some(url) = target {
+                if let Err(e) = window.navigate(url) {
+                    tracing::warn!("editor explicit navigation failed: {e}");
+                }
+            } else {
+                tracing::warn!("hub window missing; cannot derive app url for editor");
+            }
+        }
+    });
 }
 
 #[tauri::command]
 pub fn get_editor_image_path(state: State<AppState>) -> Option<String> {
+    // liveness signal: fires only when the editor frontend actually booted
+    tracing::debug!("editor webview alive — frontend requested image path");
     state.editor_image_path.lock().unwrap().clone()
 }
 
