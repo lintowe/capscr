@@ -14,13 +14,13 @@ mod windows_impl {
         Win32::{
             Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
             Graphics::Gdi::{
-                BeginPaint, CreateFontW, CreatePen, CreateSolidBrush, DeleteObject, DrawTextW,
-                Ellipse, EndPaint, FillRect, FrameRect, GetMonitorInfoW, GetStockObject,
-                InvalidateRect, MonitorFromRect, Rectangle as GdiRectangle, ScreenToClient,
-                SelectObject, SetBkMode, SetTextColor, CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS,
-                DEFAULT_CHARSET, DT_CENTER, DT_SINGLELINE, DT_VCENTER, FW_SEMIBOLD, HOLLOW_BRUSH,
-                MONITORINFO, MONITOR_DEFAULTTONEAREST, OUT_DEFAULT_PRECIS, PAINTSTRUCT, PS_SOLID,
-                TRANSPARENT,
+                BeginPaint, CombineRgn, CreateFontW, CreatePen, CreateRectRgn, CreateSolidBrush,
+                DeleteObject, DrawTextW, Ellipse, EndPaint, FillRect, FrameRect, GetMonitorInfoW,
+                GetStockObject, InvalidateRect, MonitorFromRect, Rectangle as GdiRectangle,
+                ScreenToClient, SelectClipRgn, SelectObject, SetBkMode, SetTextColor,
+                CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET, DT_CENTER, DT_SINGLELINE,
+                DT_VCENTER, FW_SEMIBOLD, HOLLOW_BRUSH, HRGN, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+                OUT_DEFAULT_PRECIS, PAINTSTRUCT, PS_SOLID, RGN_DIFF, TRANSPARENT,
             },
             System::LibraryLoader::GetModuleHandleW,
             UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI},
@@ -328,9 +328,26 @@ mod windows_impl {
                     let old_brush = SelectObject(hdc, hollow);
                     SetBkMode(hdc, TRANSPARENT);
 
+                    // clip the stroke to the border ring: pen rasterization
+                    // rounds outward and a stray row of red lands inside the
+                    // recorded region, faintly visible in captured frames.
+                    // The hole must stay colorkey-only so it stays transparent
+                    let ring = CreateRectRgn(0, 0, w, h);
+                    let hole = CreateRectRgn(
+                        BORDER_WIDTH,
+                        BORDER_WIDTH,
+                        w - BORDER_WIDTH,
+                        h - BORDER_WIDTH,
+                    );
+                    let _ = CombineRgn(ring, ring, hole, RGN_DIFF);
+                    SelectClipRgn(hdc, ring);
+
                     let half = BORDER_WIDTH / 2;
                     let _ = GdiRectangle(hdc, half, half, w - half, h - half);
 
+                    SelectClipRgn(hdc, HRGN::default());
+                    let _ = DeleteObject(hole);
+                    let _ = DeleteObject(ring);
                     SelectObject(hdc, old_pen);
                     SelectObject(hdc, old_brush);
                     let _ = DeleteObject(pen);
