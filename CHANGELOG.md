@@ -6,6 +6,15 @@ format follows [keep-a-changelog](https://keepachangelog.com/en/1.1.0/) loosely.
 
 nothing pending. drop ideas in github issues.
 
+## [0.5.38] — 2026-06-18
+
+### added
+- trim recordings in place: mp4 entries in history now have a trim action that opens the clip with in/out sliders (and set-to-playhead) and exports either a frame-accurate cut (precise, re-encoded) or an instant lossless cut (fast, stream-copied), so a quick trim no longer means opening a video editor
+
+### changed
+- capscr no longer keeps system-wide keyboard and mouse hooks running when they aren't needed: the keyboard hook is installed only while a keyboard shortcut is bound (or one is being recorded) and the mouse hook only while a mouse-button shortcut is bound, cutting capscr's background input overhead — by default no global mouse hook is installed at all
+- history tile actions (copy, reveal, re-upload, delete) now show a brief confirmation on success instead of silently completing, so a working button no longer looks like it did nothing
+
 ## [0.5.37] — 2026-06-13
 
 ### fixed
