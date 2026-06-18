@@ -2010,6 +2010,91 @@ fn set_tray_tooltip(app: &AppHandle, tooltip: &str) {
     }
 }
 
+// trim an mp4 recording to [start_secs, start_secs + duration). `fast` stream-
+// copies (instant, but the start snaps to the nearest keyframe); otherwise the
+// clip is re-encoded for a frame-accurate cut. writes a new file next to the
+// source and returns its path. recordings are video-only, so audio is dropped.
+#[tauri::command]
+pub async fn trim_mp4(
+    path: String,
+    start_secs: f64,
+    end_secs: f64,
+    fast: bool,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        trim_mp4_blocking(&path, start_secs, end_secs, fast).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+fn trim_mp4_blocking(path: &str, start_secs: f64, end_secs: f64, fast: bool) -> anyhow::Result<String> {
+    use std::path::Path;
+    if path.contains("..") {
+        anyhow::bail!("path contains directory traversal");
+    }
+    #[cfg(windows)]
+    if path.starts_with("\\\\") {
+        anyhow::bail!("network paths not allowed");
+    }
+    let src = Path::new(path);
+    if !src.exists() {
+        anyhow::bail!("file not found");
+    }
+    let is_mp4 = src
+        .extension()
+        .map(|e| e.eq_ignore_ascii_case("mp4"))
+        .unwrap_or(false);
+    if !is_mp4 {
+        anyhow::bail!("not an mp4 file");
+    }
+
+    let start = start_secs.max(0.0);
+    let duration = end_secs - start;
+    if !duration.is_finite() || duration <= 0.05 {
+        anyhow::bail!("trim must be at least 0.05s and end after start");
+    }
+
+    let stem = src.file_stem().and_then(|s| s.to_str()).unwrap_or("clip");
+    let parent = src.parent().unwrap_or_else(|| Path::new("."));
+    let base = parent.join(format!("{stem}_trim.mp4"));
+    let out = crate::clipboard::get_unique_filepath(&base);
+    let out_str = out.to_string_lossy().to_string();
+
+    let start_s = format!("{start:.3}");
+    let dur_s = format!("{duration:.3}");
+
+    let mut cmd = std::process::Command::new(crate::recording::find_ffmpeg());
+    if fast {
+        // input-side seek + stream copy: instant, keyframe-aligned start
+        cmd.args([
+            "-ss", &start_s, "-i", path, "-t", &dur_s, "-c", "copy", "-an", "-y", &out_str,
+        ]);
+    } else {
+        // decode then re-encode for a frame-accurate cut
+        cmd.args([
+            "-i", path, "-ss", &start_s, "-t", &dur_s, "-c:v", "libx264", "-pix_fmt", "yuv420p",
+            "-crf", "23", "-an", "-y", &out_str,
+        ]);
+    }
+
+    let output = cmd
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .map_err(|e| anyhow::anyhow!("failed to launch ffmpeg: {e}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let tail = stderr.trim().lines().last().unwrap_or("ffmpeg error");
+        anyhow::bail!("ffmpeg failed: {tail}");
+    }
+    if !out.exists() {
+        anyhow::bail!("ffmpeg produced no output file");
+    }
+    Ok(out_str)
+}
+
 fn apply_gif_post_action(
     task: &CaptureTask,
     app: &AppHandle,

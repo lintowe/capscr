@@ -2,7 +2,7 @@
 
 mod gif_encoder;
 
-pub use gif_encoder::{GifRecorder, is_ffmpeg_available};
+pub use gif_encoder::{GifRecorder, find_ffmpeg, is_ffmpeg_available};
 
 use std::time::Duration;
 

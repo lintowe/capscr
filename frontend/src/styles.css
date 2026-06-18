@@ -1919,3 +1919,91 @@ kbd {
   margin: 0 0 24px 0;
   line-height: 1.5;
 }
+
+/* ---------------- trim modal ---------------- */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: grid;
+  place-items: center;
+  z-index: 1000;
+  padding: 24px;
+}
+
+.modal {
+  background: var(--ink-1);
+  border: 1px solid var(--rule-2);
+  width: min(640px, 100%);
+  max-height: 100%;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+}
+
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.modal-head h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-1);
+  margin: 0;
+  letter-spacing: var(--tracked);
+}
+
+.trim-video {
+  width: 100%;
+  max-height: 46vh;
+  background: var(--ink-3);
+  display: block;
+}
+
+.trim-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.trim-row input[type="range"] {
+  flex: 1;
+  accent-color: var(--paper);
+}
+
+.trim-label {
+  font-size: 11px;
+  color: var(--mute);
+  min-width: 76px;
+}
+
+.trim-label b {
+  color: var(--text-1);
+  font-variant-numeric: tabular-nums;
+}
+
+.trim-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.trim-len {
+  font-size: 11px;
+  color: var(--mute);
+  font-variant-numeric: tabular-nums;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
