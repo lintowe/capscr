@@ -17,9 +17,11 @@ import {
   Edit3,
   UploadCloud,
   Search,
+  Scissors,
   X,
 } from "lucide-solid";
 import { api } from "../api";
+import { TrimModal } from "../components/TrimModal";
 
 type FilterKind = "all" | "images" | "gifs" | "videos" | "hdr";
 
@@ -58,6 +60,8 @@ export function History() {
   const [confirmDelete, setConfirmDelete] = createSignal<string | null>(null);
   const [search, setSearch] = createSignal("");
   const [filter, setFilter] = createSignal<FilterKind>("all");
+  // path of the mp4 currently open in the trim modal, or null
+  const [trimPath, setTrimPath] = createSignal<string | null>(null);
 
   // live-refresh the grid when a new capture lands so the user doesn't
   // have to click "reload" after every screenshot. Coalesce rapid bursts
@@ -296,6 +300,15 @@ export function History() {
                   />
                 </Show>
                 <div class="tile-actions">
+                  <Show when={e.is_mp4}>
+                    <button
+                      class="icon-btn"
+                      title="trim"
+                      onClick={() => setTrimPath(e.path)}
+                    >
+                      <Scissors size={12} stroke-width={1.5} />
+                    </button>
+                  </Show>
                   <Show when={!e.is_gif && !e.is_mp4}>
                     <button
                       class="icon-btn"
@@ -367,6 +380,18 @@ export function History() {
           </For>
         </div>
         </Show>
+      </Show>
+
+      <Show when={trimPath()}>
+        <TrimModal
+          path={trimPath()!}
+          onClose={() => setTrimPath(null)}
+          onDone={(msg) => {
+            setTrimPath(null);
+            showFlash("ok", msg);
+            refetch();
+          }}
+        />
       </Show>
     </>
   );

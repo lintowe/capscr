@@ -216,6 +216,8 @@ export const api = {
   reuploadCapture: (path: string) =>
     invoke<{ url: string; delete_url: string | null }>("reupload_capture", { path }),
   openInExplorer: (path: string) => invoke<void>("open_in_explorer", { path }),
+  trimMp4: (path: string, startSecs: number, endSecs: number, fast: boolean) =>
+    invoke<string>("trim_mp4", { path, startSecs, endSecs, fast }),
   exitApp: () => invoke<void>("exit_app"),
 
   listInstalledPlugins: () => invoke<InstalledPlugin[]>("list_installed_plugins"),

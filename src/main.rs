@@ -218,6 +218,7 @@ fn main() {
             commands::copy_capture_to_clipboard,
             commands::reupload_capture,
             commands::open_in_explorer,
+            commands::trim_mp4,
             commands::exit_app,
             commands::set_autostart,
             commands::get_autostart,
