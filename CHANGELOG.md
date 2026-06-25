@@ -6,6 +6,19 @@ format follows [keep-a-changelog](https://keepachangelog.com/en/1.1.0/) loosely.
 
 nothing pending. drop ideas in github issues.
 
+## [0.5.39] — 2026-06-25
+
+### added
+- offline windows-native ocr: extract text from captured screenshots locally via WinRT
+- floating desktop pinning: pin screenshots to the screen as borderless transparent sticky notes with customizable opacity controls
+- jxl and avif output: added support for native jpeg xl and avif file formats
+- s3 compatible cloud uploader: configure and test custom s3/compatible buckets for image storage with signature v4 and dpapi key encryption
+- wasapi loopback audio recording: record system audio with screen recording and merge into mp4 outputs using ffmpeg
+
+### changed
+- screenshot overlay magnifier: adjust zoom factor with mouse wheel scroll
+- select region handles: precision border adjustments using arrow keys (shift, ctrl, and ctrl+shift combinations)
+
 ## [0.5.38] — 2026-06-18
 
 ### added
