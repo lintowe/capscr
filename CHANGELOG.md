@@ -6,6 +6,11 @@ format follows [keep-a-changelog](https://keepachangelog.com/en/1.1.0/) loosely.
 
 nothing pending. drop ideas in github issues.
 
+## [0.5.40] — 2026-06-28
+
+### fixed
+- resolved monochrome and non-alpha cursors (such as the text select I-beam) being completely invisible in screenshots and video recordings: capscr now queries the cursor's monochrome AND mask directly to reconstruct the alpha channel, instead of using a color-based heuristic that incorrectly treated black pixels as transparent
+
 ## [0.5.39] — 2026-06-25
 
 ### added
