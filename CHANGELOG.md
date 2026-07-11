@@ -2,6 +2,35 @@
 
 format follows [keep-a-changelog](https://keepachangelog.com/en/1.1.0/) loosely. dates are release-tag dates.
 
+## [0.5.42] — 2026-07-11
+
+### added
+- a **region (last)** capture mode: bind it to a task and it re-fires your previous selection rectangle with no selector, so re-grabbing the same panel doesn't mean re-dragging. the first use with no stored rectangle falls back to a normal region drag and remembers it
+- the plugins tab now shows what each installed plugin was granted (clipboard, image read/modify, notifications, and each allowed fetch host), so you can see what a plugin can reach before enabling it
+
+### changed
+- the ftp destination no longer advertises ftps in the dropdown, section title, or the tls hint — ftps isn't implemented, so the copy now points at sftp for an encrypted transfer
+- an mp4 endpoint typed as `http://` for the s3 uploader is refused before the request, so the sigv4 credentials and image never go out in the clear
+
+### fixed
+- quitting capscr during an mp4 recording no longer loses the whole clip: it saved only gif recordings and dropped mp4s silently. it now saves the mp4 and, if the save fails, says so
+- upload redirects and connections are hardened against SSRF: a server can no longer redirect an upload to an internal address (the redirect target is resolved and checked, not just string-matched), and ftp/sftp/http connections dial the exact address that was validated instead of re-resolving the hostname, closing a DNS-rebinding window. the marketplace registry and plugin downloads go through the same guard
+- a plugin can no longer declare a catch-all `https://*` fetch permission — network access has to name concrete hosts
+- the mouse cursor no longer has a dark halo in screenshots and recordings: it was composited with the wrong alpha math, darkening anti-aliased edges and drop shadows
+- one bad value in `config.toml` no longer wipes every setting for the session — the file is repaired in place (out-of-range HDR values clamped, malformed or duplicate task hotkeys dropped/unbound) instead of falling back to defaults
+- a saved capture is announced only after the file is actually written; a failed background save now removes the empty placeholder and shows an error instead of a false "capture saved"
+- a recording cut short by a disk-write failure, and an mp4 saved without its system-audio track, now each surface a note instead of a silent truncation or a silent drop
+- the audio temp file no longer lingers in `%TEMP%` when an mp4 save fails
+- captures saved to the history folder can now be revealed in explorer and opened in the editor, not just deleted or copied
+- the custom-http fields (post url, form field, response path) only appear when the Custom destination is selected, instead of under every destination
+- binding a task to a hotkey another task already uses no longer leaves the list showing a phantom binding the app never saved
+- s3 can be picked as a per-task upload target
+- a pinned screenshot window always appears and stays closable even if its image can't be loaded, and lowering its opacity no longer fades its own controls out of reach
+- on a multi-HDR-monitor desktop, a capture on the secondary monitor is tonemapped against that monitor's SDR-content brightness rather than the primary's, and a transient panic in the HDR path no longer bricks HDR capture until restart
+- a non-ASCII upload URL no longer crashes the tray menu rebuild
+- the empty-history hint shows the screenshot/gif hotkeys you actually bound rather than stale defaults
+- refreshed dependencies to clear outstanding security advisories
+
 ## [0.5.41] — 2026-07-11
 
 ### added
