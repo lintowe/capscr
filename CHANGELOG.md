@@ -2,10 +2,21 @@
 
 format follows [keep-a-changelog](https://keepachangelog.com/en/1.1.0/) loosely. dates are release-tag dates.
 
-## [unreleased]
+## [0.5.41] — 2026-07-11
 
 ### added
 - a native installer: `capscr-x.x.x-setup.exe` replaces the bare MSI as the download — a single small window in capscr's own greyscale style (no wizard), wrapping the same signed MSI the in-app updater consumes, so the update chain is untouched. supports `/S` for silent installs and `/uninstall`; the MSI stays attached for scripted deployment
+
+### fixed
+- resolved recordings stopping long before the configured max duration on large or busy regions: captured frames no longer pile up in a fixed 1 GB memory buffer (about 8 seconds of moving 1080p content). GIF frames now spool to a temp file on disk and MP4 frames are encoded by ffmpeg live while the recording runs, so the limit in settings → capture is what actually ends a recording
+- resolved the remaining playback speed drift in GIF and MP4 recordings: rounding each frame's delay separately accumulated error over the clip (15fps GIFs ~11% fast, 60fps GIFs 20% slow, MP4s up to a third too long when capture ran behind); frame timings are now scheduled against the cumulative wall clock so total drift stays under one frame regardless of length
+- resolved system audio in MP4 recordings drifting out of sync after quiet stretches and sometimes cutting the video short: loopback capture delivers nothing while the system is silent, so those gaps are now zero-filled to keep the track wall-clock aligned
+- console windows no longer flash while capscr runs ffmpeg (mp4 save, trim, availability check) or opens a capture with its default app
+
+### changed
+- stopping an MP4 recording now saves near-instantly: encoding happens during capture instead of all at once after stop
+- a recording that stops by itself now says why: hitting the configured max duration, the frame-count safety limit, or low disk space each surface a toast instead of ending silently
+- gif recordings no longer engage the system-audio loopback tap; it only runs for MP4, the format that can carry the track
 
 ## [0.5.40] — 2026-06-28
 
