@@ -11,7 +11,7 @@ Fast HDR-aware Windows screen capture — tray-first, signed updates, no telemet
 
 HDR captures via Windows.Graphics.Capture FP16, ICtCp luminance-only tonemap (per-frame MaxCLL via P99), SDR PNG output. Per-monitor SDR-white detection.
 
-Per-hotkey task model. Each hotkey binds a capture mode (region, window, fullscreen, active monitor, region GIF, region MP4) plus a post-action (save, clipboard, open in editor, upload). No central default — every hotkey is its own task. Default tasks: region → save + clipboard (unbound out of the box; a first-launch prompt asks you to pick a key), `Ctrl+Shift+G` for region GIF → save, `Ctrl+Shift+V` for region MP4 → save.
+Per-hotkey task model. Each hotkey binds a capture mode (region, region-last, window, fullscreen, active monitor, region GIF, region MP4) plus a post-action (save, clipboard, open in editor, upload). No central default — every hotkey is its own task. Default tasks: region → save + clipboard (unbound out of the box; a first-launch prompt asks you to pick a key), `Ctrl+Shift+G` for region GIF → save, `Ctrl+Shift+V` for region MP4 → save.
 
 Selection overlay: drag for region, click for window, Enter for fullscreen, `Alt+click` for color picker (pixel `#RRGGBB` copied to clipboard). Live `WxH @ X,Y` readout, 8× magnifier loupe, window-snap highlight.
 

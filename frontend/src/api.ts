@@ -106,7 +106,7 @@ export interface CaptureTask {
   id: string;
   name: string;
   hotkey: string;
-  capture_mode: "region" | "window" | "fullscreen" | "active-monitor" | "region-gif" | "region-mp4";
+  capture_mode: "region" | "region-last" | "window" | "fullscreen" | "active-monitor" | "region-gif" | "region-mp4";
   post_action:
     | "clipboard"
     | "save-file"

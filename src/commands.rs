@@ -28,6 +28,7 @@ pub fn history_dir() -> Option<PathBuf> {
 #[serde(rename_all = "kebab-case")]
 pub enum CaptureModeArg {
     Region,
+    RegionLast,
     Window,
     Fullscreen,
     ActiveMonitor,
@@ -304,21 +305,28 @@ fn run_capture_pipeline_inner(
         }
     }
 
+    // "region (last)" re-fires the previous selection rectangle without showing
+    // the selector. only the first use (no stored rect yet) falls back to a
+    // normal region drag.
+    let replay_rect = if matches!(mode, CaptureModeArg::RegionLast) {
+        *gate_state.last_region.lock().unwrap()
+    } else {
+        None
+    };
+    let needs_selector = matches!(
+        mode,
+        CaptureModeArg::Region | CaptureModeArg::Window | CaptureModeArg::Fullscreen
+    ) || (matches!(mode, CaptureModeArg::RegionLast) && replay_rect.is_none());
+
     // kick window enumeration onto a background thread so it overlaps the
     // freeze-frame capture below instead of running serially on the selector's
     // critical path. only the selector-backed modes consume the result.
     #[cfg(windows)]
-    if matches!(
-        mode,
-        CaptureModeArg::Region | CaptureModeArg::Window | CaptureModeArg::Fullscreen
-    ) {
+    if needs_selector {
         UnifiedSelector::prewarm_window_list();
     }
 
-    let frozen_frame = if matches!(
-        mode,
-        CaptureModeArg::Region | CaptureModeArg::Window | CaptureModeArg::Fullscreen
-    ) {
+    let frozen_frame = if needs_selector {
         let t0 = std::time::Instant::now();
         match ScreenCapture::all_monitors() {
             Ok(img) => {
@@ -347,9 +355,11 @@ fn run_capture_pipeline_inner(
     };
 
     let selection = match mode {
-        CaptureModeArg::Region | CaptureModeArg::Window | CaptureModeArg::Fullscreen => {
-            UnifiedSelector::select(frozen_frame.clone())
-        }
+        _ if replay_rect.is_some() => SelectionResult::Region(replay_rect.unwrap()),
+        CaptureModeArg::Region
+        | CaptureModeArg::RegionLast
+        | CaptureModeArg::Window
+        | CaptureModeArg::Fullscreen => UnifiedSelector::select(frozen_frame.clone()),
         CaptureModeArg::ActiveMonitor => SelectionResult::FullScreen,
     };
 
@@ -362,6 +372,8 @@ fn run_capture_pipeline_inner(
     ) = match selection {
         SelectionResult::Cancelled => return Ok(()),
         SelectionResult::Region(rect) => {
+            // remember the rectangle so a "region (last)" task can replay it
+            *gate_state.last_region.lock().unwrap() = Some(rect);
             if let Some(frozen) = &frozen_frame {
                 #[cfg(windows)]
                 let (min_x, min_y) = {
@@ -529,7 +541,7 @@ fn run_capture_pipeline_inner(
     }
 
     let capture_type = match mode {
-        CaptureModeArg::Region => CaptureType::Region,
+        CaptureModeArg::Region | CaptureModeArg::RegionLast => CaptureType::Region,
         CaptureModeArg::Window => CaptureType::Window,
         CaptureModeArg::Fullscreen | CaptureModeArg::ActiveMonitor => CaptureType::FullScreen,
     };
@@ -1761,9 +1773,10 @@ pub fn run_task(task: &CaptureTask, app: &AppHandle) -> anyhow::Result<()> {
         return run_gif_task(task, app);
     }
     let mode = match task.capture_mode {
-        TaskCaptureMode::Region | TaskCaptureMode::Window | TaskCaptureMode::Fullscreen => {
-            CaptureModeArg::from_task_mode(task.capture_mode)
-        }
+        TaskCaptureMode::Region
+        | TaskCaptureMode::RegionLast
+        | TaskCaptureMode::Window
+        | TaskCaptureMode::Fullscreen => CaptureModeArg::from_task_mode(task.capture_mode),
         TaskCaptureMode::ActiveMonitor => CaptureModeArg::ActiveMonitor,
         TaskCaptureMode::RegionGif | TaskCaptureMode::RegionMp4 => unreachable!("handled above"),
     };
@@ -2304,6 +2317,7 @@ impl CaptureModeArg {
     pub fn from_task_mode(mode: TaskCaptureMode) -> Self {
         match mode {
             TaskCaptureMode::Region => CaptureModeArg::Region,
+            TaskCaptureMode::RegionLast => CaptureModeArg::RegionLast,
             TaskCaptureMode::Window => CaptureModeArg::Window,
             TaskCaptureMode::Fullscreen => CaptureModeArg::Fullscreen,
             TaskCaptureMode::ActiveMonitor => CaptureModeArg::ActiveMonitor,

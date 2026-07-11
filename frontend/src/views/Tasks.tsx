@@ -8,6 +8,7 @@ import { config, mutateConfig, refetchConfig } from "../store";
 
 const CAPTURE_MODES: { id: CaptureTask["capture_mode"]; label: string }[] = [
   { id: "region", label: "region (drag a rect)" },
+  { id: "region-last", label: "region (last — no drag)" },
   { id: "window", label: "window (pick one)" },
   { id: "fullscreen", label: "fullscreen (primary)" },
   { id: "active-monitor", label: "active monitor" },

@@ -56,6 +56,9 @@ pub struct AppState {
     // register/reload pass.
     pub hotkey_status: Mutex<HashMap<String, HotkeyStatus>>,
     pub pinned_images: Mutex<HashMap<String, String>>,
+    // last committed region selection, so a "region (last)" task can re-fire the
+    // same rectangle without showing the selector. None until the first drag.
+    pub last_region: Mutex<Option<crate::capture::Rectangle>>,
 }
 
 #[derive(Clone, Debug)]
@@ -91,6 +94,7 @@ impl AppState {
             hotkeys_disabled: AtomicBool::new(disabled),
             hotkey_status: Mutex::new(HashMap::new()),
             pinned_images: Mutex::new(HashMap::new()),
+            last_region: Mutex::new(None),
         }
     }
 

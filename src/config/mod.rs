@@ -55,6 +55,7 @@ pub struct CaptureTask {
 #[serde(rename_all = "kebab-case")]
 pub enum TaskCaptureMode {
     Region,
+    RegionLast,
     Window,
     Fullscreen,
     ActiveMonitor,
@@ -66,6 +67,7 @@ impl TaskCaptureMode {
     pub fn display_name(&self) -> &'static str {
         match self {
             TaskCaptureMode::Region => "Region",
+            TaskCaptureMode::RegionLast => "Region (last)",
             TaskCaptureMode::Window => "Window",
             TaskCaptureMode::Fullscreen => "Fullscreen (selector)",
             TaskCaptureMode::ActiveMonitor => "Active monitor",
