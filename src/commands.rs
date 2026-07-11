@@ -1280,10 +1280,10 @@ pub fn open_in_explorer(path: String, state: State<AppState>) -> Result<(), Stri
     let buf = PathBuf::from(&path);
     let config = state.config.lock().unwrap().clone();
     let canonical = std::fs::canonicalize(&buf).map_err(|e| e.to_string())?;
-    let dir_canonical =
-        std::fs::canonicalize(&config.output.directory).map_err(|e| e.to_string())?;
-    if !canonical.starts_with(&dir_canonical) {
-        return Err("Path is outside the configured output directory".into());
+    // accept the history dir too, not just the output dir — the History tab
+    // lists both, so "reveal in folder" must reach either
+    if !is_path_allowed(&canonical, &config) {
+        return Err("Path is outside the allowed capture directories".into());
     }
     #[cfg(windows)]
     {
@@ -1557,9 +1557,9 @@ pub async fn open_editor(
     let buf = PathBuf::from(&path);
     let canonical = std::fs::canonicalize(&buf).map_err(|e| e.to_string())?;
     let cfg = state.config.lock().unwrap().clone();
-    let dir_canonical = std::fs::canonicalize(&cfg.output.directory).map_err(|e| e.to_string())?;
-    if !canonical.starts_with(&dir_canonical) {
-        return Err("Path is outside the configured output directory".into());
+    // history captures live in the history dir; the editor must reach them too
+    if !is_path_allowed(&canonical, &cfg) {
+        return Err("Path is outside the allowed capture directories".into());
     }
     let ext = canonical
         .extension()
@@ -1585,10 +1585,10 @@ pub fn save_edited_image(
         .ok_or_else(|| "target_path has no parent".to_string())?;
     let config = state.config.lock().unwrap().clone();
     let canonical_parent = std::fs::canonicalize(parent).map_err(|e| e.to_string())?;
-    let dir_canonical =
-        std::fs::canonicalize(&config.output.directory).map_err(|e| e.to_string())?;
-    if !canonical_parent.starts_with(&dir_canonical) {
-        return Err("Path is outside the configured output directory".into());
+    // allow writing edited images back into the history dir too, matching where
+    // open_editor is now allowed to read from
+    if !is_path_allowed(&canonical_parent, &config) {
+        return Err("Path is outside the allowed capture directories".into());
     }
     if bytes.is_empty() {
         return Err("Image data is empty".into());
