@@ -998,7 +998,7 @@ mod tests {
         let delays = gif_delay_schedule(&times, Duration::from_secs_f64(1.0 / 60.0));
         let total: u64 = delays.iter().map(|&d| d as u64).sum();
         assert!((199..=201).contains(&total), "total {total}cs, want ~200");
-        assert!(delays.iter().any(|&d| d == 0), "expected dropped frames");
+        assert!(delays.contains(&0), "expected dropped frames");
         assert!(delays.iter().all(|&d| d == 0 || d >= 2));
     }
 
