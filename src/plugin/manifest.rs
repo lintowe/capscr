@@ -136,6 +136,7 @@ impl PluginManifest {
 /// `https://*` (whose prefix "https://" matched every https url), so a plugin's
 /// network reach has to be spelled out host by host.
 fn validate_fetch_pattern(pattern: &str) -> Result<()> {
+    let has_wildcard = pattern.ends_with('*');
     let prefix = pattern.strip_suffix('*').unwrap_or(pattern);
     let host_and_path = prefix
         .strip_prefix("https://")
@@ -144,6 +145,15 @@ fn validate_fetch_pattern(pattern: &str) -> Result<()> {
     if host.is_empty() || host.starts_with('*') || !host.contains('.') {
         bail!(
             "fetch pattern '{pattern}' must name a concrete host, e.g. https://api.example.com/*"
+        );
+    }
+    // a wildcard directly after the host (https://api.example.com*) prefix-matches
+    // https://api.example.com.evil.com, so the displayed capability understates
+    // the real reach. require the host to be terminated by a path separator so
+    // the wildcard can only widen the path, never the host label
+    if has_wildcard && !host_and_path.contains('/') {
+        bail!(
+            "fetch pattern '{pattern}' must put the wildcard on a path boundary, e.g. https://api.example.com/*"
         );
     }
     Ok(())
@@ -218,6 +228,10 @@ mod tests {
         assert!(validate_fetch_pattern("*").is_err());
         assert!(validate_fetch_pattern("http://api.example.com/*").is_err());
         assert!(validate_fetch_pattern("https://localhost/*").is_err());
+        // wildcard glued to the host label matches api.example.com.evil.com
+        assert!(validate_fetch_pattern("https://api.example.com*").is_err());
+        // but a path-prefix wildcard keeps the host bounded and is fine
+        assert!(validate_fetch_pattern("https://api.example.com/v1*").is_ok());
     }
 
     #[test]
