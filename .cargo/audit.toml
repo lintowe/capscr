@@ -39,4 +39,15 @@ ignore = [
     "RUSTSEC-2025-0081",  # unic-char-property
     "RUSTSEC-2025-0098",  # unic-ucd-version
     "RUSTSEC-2025-0100",  # unic-ucd-ident
+
+    # quick-xml DoS advisories (quadratic duplicate-attribute scan; unbounded
+    # namespace-declaration allocation). the only two quick-xml copies still on
+    # <0.41 are pulled exclusively by linux display-stack crates that never link
+    # into the Windows binary: 0.30.0 via xcb (X11), 0.39.4 via wayland-scanner
+    # (Wayland). the Windows runtime and macOS build paths were moved to
+    # quick-xml 0.41 by bumping plist and dropping tauri-winrt-notification's
+    # quick-xml dep. re-check when a wry release retires the vendored X11/Wayland
+    # crates.
+    "RUSTSEC-2026-0194",  # quick-xml quadratic attribute check (xcb/wayland only)
+    "RUSTSEC-2026-0195",  # quick-xml unbounded namespace alloc (xcb/wayland only)
 ]
