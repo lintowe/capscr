@@ -5,8 +5,8 @@ pub mod known_hosts;
 use anyhow::{anyhow, Result};
 use image::RgbaImage;
 use std::io::Cursor;
-use std::net::{IpAddr, Ipv4Addr, ToSocketAddrs};
-use std::sync::OnceLock;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs};
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 const MAX_UPLOAD_SIZE: usize = 32 * 1024 * 1024;
@@ -92,13 +92,54 @@ pub struct ImageUploader {
 
 static SHARED_UPLOADER: OnceLock<std::result::Result<ImageUploader, String>> = OnceLock::new();
 
+// the actual SSRF enforcement: reqwest resolves every connection — the initial
+// request and each redirect hop — through this resolver, so a hostname that
+// resolves to a private/internal address is refused at connect time. this
+// closes the gap where the redirect policy only string-matched the host and
+// where the real connect re-resolved DNS after validate_url_security's checks.
+struct ValidatingResolver;
+
+// resolve a hostname and keep only public addresses, rejecting the whole lookup
+// if any resolved address is private/internal (a rebinding resolver mixing one
+// public and one private answer must not slip the private one through)
+fn resolve_public_addrs(host: &str) -> std::result::Result<Vec<SocketAddr>, String> {
+    // getaddrinfo needs a port; the value is irrelevant to resolution
+    let addrs: Vec<SocketAddr> = (host, 0u16)
+        .to_socket_addrs()
+        .map_err(|e| e.to_string())?
+        .collect();
+    if addrs.is_empty() {
+        return Err("hostname did not resolve".into());
+    }
+    if let Some(bad) = addrs.iter().find(|a| ImageUploader::is_private_ip(a.ip())) {
+        return Err(format!("host resolves to blocked address {}", bad.ip()));
+    }
+    Ok(addrs)
+}
+
+impl reqwest::dns::Resolve for ValidatingResolver {
+    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        let host = name.as_str().to_string();
+        Box::pin(async move {
+            match resolve_public_addrs(&host) {
+                Ok(addrs) => {
+                    let iter: reqwest::dns::Addrs = Box::new(addrs.into_iter());
+                    Ok(iter)
+                }
+                Err(e) => Err(e.into()),
+            }
+        })
+    }
+}
+
 impl ImageUploader {
     pub fn new() -> Result<Self> {
         let client = reqwest::blocking::Client::builder()
             .timeout(Duration::from_secs(UPLOAD_TIMEOUT_SECS))
             .user_agent("capscr/1.0")
-            // validate each redirect target so an attacker-controlled server
-            // can't redirect uploads to a private/internal IP (SSRF)
+            .dns_resolver(Arc::new(ValidatingResolver))
+            // a cheap first pass on each redirect target; the dns resolver above
+            // is what actually stops a redirect to a private/internal IP (SSRF)
             .redirect(reqwest::redirect::Policy::custom(|attempt| {
                 if attempt.previous().len() >= MAX_REDIRECTS {
                     return attempt.error("too many redirects");
@@ -1814,5 +1855,20 @@ mod tests {
     fn ftp_rejects_localhost_label() {
         let err = validate_resolved_host("localhost", 21).unwrap_err();
         assert!(err.to_string().contains("not allowed"));
+    }
+
+    #[test]
+    fn resolver_rejects_private_literal() {
+        // the http/redirect ssrf guard: a name resolving to a private address
+        // must be refused before connect
+        assert!(resolve_public_addrs("127.0.0.1").is_err());
+        assert!(resolve_public_addrs("10.0.0.5").is_err());
+        assert!(resolve_public_addrs("localhost").is_err());
+    }
+
+    #[test]
+    fn resolver_accepts_public_literal() {
+        let addrs = resolve_public_addrs("93.184.216.34").expect("public ip should pass");
+        assert!(addrs.iter().all(|a| !ImageUploader::is_private_ip(a.ip())));
     }
 }
