@@ -30,13 +30,17 @@ mod windows_impl {
                 CAPTUREBLT, DIB_RGB_COLORS, HBITMAP, HDC, HOLLOW_BRUSH, OPAQUE, PAINTSTRUCT,
                 PS_SOLID, SRCCOPY, TRANSPARENT,
             },
-            System::LibraryLoader::GetModuleHandleW,
+            System::{
+                LibraryLoader::GetModuleHandleW,
+                Threading::{AttachThreadInput, GetCurrentThreadId},
+            },
             UI::{
-                Input::KeyboardAndMouse::{VK_CONTROL, VK_ESCAPE, VK_RETURN, VK_SHIFT, VK_SPACE, VK_LEFT, VK_RIGHT, VK_UP, VK_DOWN},
+                Input::KeyboardAndMouse::{SetFocus, VK_CONTROL, VK_ESCAPE, VK_RETURN, VK_SHIFT, VK_SPACE, VK_LEFT, VK_RIGHT, VK_UP, VK_DOWN},
                 WindowsAndMessaging::{
-                    ChildWindowFromPointEx, CreateWindowExW, DefWindowProcW, DestroyWindow,
-                    DispatchMessageW, EnumWindows, GetAncestor, GetCursorPos, GetMessageW,
-                    GetSystemMetrics, GetWindowLongW, GetWindowRect, IsIconic, IsWindowVisible,
+                    BringWindowToTop, ChildWindowFromPointEx, CreateWindowExW, DefWindowProcW,
+                    DestroyWindow, DispatchMessageW, EnumWindows, GetAncestor, GetCursorPos,
+                    GetForegroundWindow, GetMessageW, GetSystemMetrics, GetWindowLongW,
+                    GetWindowRect, GetWindowThreadProcessId, IsIconic, IsWindowVisible,
                     PostQuitMessage, RegisterClassW, SetCursorPos, SetForegroundWindow,
                     SetLayeredWindowAttributes, ShowWindow, TranslateMessage, CS_HREDRAW,
                     CS_VREDRAW, CWP_SKIPINVISIBLE, CWP_SKIPTRANSPARENT, GA_ROOT, GWL_EXSTYLE,
@@ -710,10 +714,31 @@ mod windows_impl {
             );
 
             let _ = ShowWindow(hwnd, SW_SHOWNORMAL);
-            // grab foreground + keyboard focus so VK_ESCAPE actually reaches
-            // WM_KEYDOWN. without this the overlay paints but key input goes
-            // to whatever window had focus before the hotkey fired.
-            let _ = SetForegroundWindow(hwnd);
+            // grab foreground + keyboard focus so Escape, the arrow nudges, and
+            // Enter reach WM_KEYDOWN. the hotkey that spawned us was swallowed by
+            // the low-level hook, so Windows can refuse a bare SetForegroundWindow
+            // from this non-foreground worker thread; attach to the current
+            // foreground thread's input queue for the call so the grant lands,
+            // and SetFocus as a backstop. without this the overlay paints but key
+            // input goes to whatever window had focus before the hotkey fired.
+            {
+                let fg = GetForegroundWindow();
+                let our_thread = GetCurrentThreadId();
+                let fg_thread = if fg.is_invalid() {
+                    0
+                } else {
+                    GetWindowThreadProcessId(fg, None)
+                };
+                let attached = fg_thread != 0
+                    && fg_thread != our_thread
+                    && AttachThreadInput(our_thread, fg_thread, true).as_bool();
+                let _ = SetForegroundWindow(hwnd);
+                let _ = BringWindowToTop(hwnd);
+                let _ = SetFocus(hwnd);
+                if attached {
+                    let _ = AttachThreadInput(our_thread, fg_thread, false);
+                }
+            }
 
             let mut msg = MSG::default();
             while SELECTING.load(Ordering::SeqCst) {
