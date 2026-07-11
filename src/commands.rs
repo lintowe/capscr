@@ -1836,6 +1836,34 @@ fn perform_ffmpeg_download() -> anyhow::Result<()> {
     }
 
     let zip_bytes = resp.bytes()?;
+
+    // verify the payload against the vendor's published sha256 sidecar before
+    // trusting a binary we're about to write and later execute. this closes the
+    // no-integrity-check gap: a truncated, corrupted, or zip-only-tampered
+    // download is rejected instead of run. (it can't by itself defend a fully
+    // compromised host that serves a matching hash, but it is fetched over the
+    // same TLS channel and fails closed.)
+    let expected = client
+        .get(format!("{url}.sha256"))
+        .send()?
+        .error_for_status()?
+        .text()?
+        .split_whitespace()
+        .next()
+        .unwrap_or_default()
+        .to_lowercase();
+    if expected.len() != 64 || !expected.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(anyhow::anyhow!(
+            "ffmpeg checksum sidecar missing or malformed; refusing to install unverified binary"
+        ));
+    }
+    let got = hex::encode(<sha2::Sha256 as sha2::Digest>::digest(zip_bytes.as_ref()));
+    if got != expected {
+        return Err(anyhow::anyhow!(
+            "ffmpeg download failed its integrity check (sha256 mismatch)"
+        ));
+    }
+
     let mut archive = zip::ZipArchive::new(std::io::Cursor::new(zip_bytes.as_ref()))?;
     let mut found = false;
 
