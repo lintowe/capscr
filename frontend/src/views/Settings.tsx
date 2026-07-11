@@ -310,7 +310,7 @@ function CapturePane(props: { c: AppConfig; patch: Patch }) {
         </div>
       </Section>
 
-      <Section title="gif recording">
+      <Section title="recording (gif + mp4)">
         <div class="field">
           <label class="field-label">frame rate</label>
           <div class="field-control">
@@ -342,7 +342,7 @@ function CapturePane(props: { c: AppConfig; patch: Patch }) {
                   props.patch("capture", { ...c().capture, gif_max_duration_secs: v });
               }}
             />
-            <span class="field-hint">seconds, auto-stops</span>
+            <span class="field-hint">seconds, 1-300 — the recording auto-stops and saves when reached</span>
           </div>
         </div>
         <div class="field">
