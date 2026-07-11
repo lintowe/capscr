@@ -4,7 +4,8 @@ mod gif_encoder;
 mod mp4_stream;
 mod spool;
 
-pub use gif_encoder::{GifRecorder, find_ffmpeg, is_ffmpeg_available};
+pub use gif_encoder::{GifRecorder, is_ffmpeg_available};
+pub use mp4_stream::ffmpeg_command;
 
 use std::time::Duration;
 

@@ -752,7 +752,7 @@ pub fn is_ffmpeg_available() -> bool {
         return path.exists();
     }
     // check if system ffmpeg is runnable
-    std::process::Command::new("ffmpeg")
+    ffmpeg_command()
         .arg("-version")
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())

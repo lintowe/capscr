@@ -976,9 +976,13 @@ fn run_post_action(
 pub fn open_in_default_image_editor(path: &std::path::Path) -> anyhow::Result<()> {
     #[cfg(windows)]
     {
+        use std::os::windows::process::CommandExt;
         std::process::Command::new("cmd")
             .args(["/C", "start", "\"\"", "/B"])
             .arg(path)
+            // CREATE_NO_WINDOW: cmd is a console app and the gui-subsystem
+            // parent would otherwise flash a console window
+            .creation_flags(0x0800_0000)
             .spawn()?;
     }
     #[cfg(not(windows))]
@@ -2100,7 +2104,7 @@ fn trim_mp4_blocking(path: &str, start_secs: f64, end_secs: f64, fast: bool) -> 
     let start_s = format!("{start:.3}");
     let dur_s = format!("{duration:.3}");
 
-    let mut cmd = std::process::Command::new(crate::recording::find_ffmpeg());
+    let mut cmd = crate::recording::ffmpeg_command();
     if fast {
         // input-side seek + stream copy: instant, keyframe-aligned start
         cmd.args([
