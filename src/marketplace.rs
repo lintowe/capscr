@@ -86,6 +86,7 @@ pub fn fetch_registry(registry_url: &str) -> Result<Registry> {
     let client = reqwest::blocking::Client::builder()
         .timeout(REGISTRY_FETCH_TIMEOUT)
         .user_agent(concat!("capscr/", env!("CARGO_PKG_VERSION")))
+        .dns_resolver(crate::upload::ssrf_validating_resolver())
         .build()?;
     let resp = client.get(registry_url).send()?;
     if !resp.status().is_success() {
@@ -129,6 +130,7 @@ pub fn install_plugin(plugins_dir: &Path, entry: &RegistryEntry) -> Result<()> {
     let client = reqwest::blocking::Client::builder()
         .timeout(PLUGIN_DOWNLOAD_TIMEOUT)
         .user_agent(concat!("capscr/", env!("CARGO_PKG_VERSION")))
+        .dns_resolver(crate::upload::ssrf_validating_resolver())
         .build()?;
     let resp = client.get(&entry.download_url).send()?;
     if !resp.status().is_success() {

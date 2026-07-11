@@ -97,7 +97,14 @@ static SHARED_UPLOADER: OnceLock<std::result::Result<ImageUploader, String>> = O
 // resolves to a private/internal address is refused at connect time. this
 // closes the gap where the redirect policy only string-matched the host and
 // where the real connect re-resolved DNS after validate_url_security's checks.
-struct ValidatingResolver;
+pub(crate) struct ValidatingResolver;
+
+/// a reqwest DNS resolver that refuses any host resolving to a private/internal
+/// address. share it with other outbound clients (the marketplace) so they get
+/// the same SSRF guard the uploader has.
+pub(crate) fn ssrf_validating_resolver() -> Arc<ValidatingResolver> {
+    Arc::new(ValidatingResolver)
+}
 
 // resolve a hostname and keep only public addresses, rejecting the whole lookup
 // if any resolved address is private/internal (a rebinding resolver mixing one
