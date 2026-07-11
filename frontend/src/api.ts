@@ -115,6 +115,8 @@ export interface CaptureTask {
     | "prompt"
     | "do-nothing";
   target_destination?: "imgur" | "custom" | "ftp" | "sftp" | "s3" | null;
+  // per-task pre-capture delay in ms; null falls back to the global delay
+  delay_ms?: number | null;
 }
 
 export interface AppConfig {

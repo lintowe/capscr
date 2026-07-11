@@ -348,6 +348,33 @@ export function Tasks() {
                               </div>
                             </div>
                           </Show>
+                          <Show when={!isRecordingMode(task.capture_mode)}>
+                            <div class="field">
+                              <label class="field-label">delay</label>
+                              <div class="field-control">
+                                <input
+                                  type="number"
+                                  min={0}
+                                  max={30000}
+                                  step={100}
+                                  placeholder="global"
+                                  value={task.delay_ms ?? ""}
+                                  onChange={(e) => {
+                                    const raw = e.currentTarget.value.trim();
+                                    const v =
+                                      raw === ""
+                                        ? null
+                                        : Math.min(30000, Math.max(0, Math.round(Number(raw) || 0)));
+                                    e.currentTarget.value = v === null ? "" : String(v);
+                                    updateTask(i(), { delay_ms: v });
+                                  }}
+                                />
+                                <span class="field-hint">
+                                  ms before capture — blank uses the global delay
+                                </span>
+                              </div>
+                            </div>
+                          </Show>
                         </div>
                       </div>
 

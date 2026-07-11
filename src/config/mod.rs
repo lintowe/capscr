@@ -54,6 +54,10 @@ pub struct CaptureTask {
     pub post_action: TaskPostAction,
     #[serde(default)]
     pub target_destination: Option<TaskUploadTarget>,
+    /// per-task pre-capture delay in ms; None falls back to the global
+    /// capture.delay_ms, so a timed task can coexist with instant ones
+    #[serde(default)]
+    pub delay_ms: Option<u32>,
 }
 
 impl Default for CaptureTask {
@@ -68,6 +72,7 @@ impl Default for CaptureTask {
             capture_mode: TaskCaptureMode::Region,
             post_action: TaskPostAction::SaveAndClipboard,
             target_destination: None,
+            delay_ms: None,
         }
     }
 }
@@ -143,6 +148,7 @@ fn default_capture_tasks() -> Vec<CaptureTask> {
             capture_mode: TaskCaptureMode::Region,
             post_action: TaskPostAction::SaveAndClipboard,
             target_destination: None,
+            delay_ms: None,
         },
         CaptureTask {
             id: "gif-save".to_string(),
@@ -151,6 +157,7 @@ fn default_capture_tasks() -> Vec<CaptureTask> {
             capture_mode: TaskCaptureMode::RegionGif,
             post_action: TaskPostAction::SaveFile,
             target_destination: None,
+            delay_ms: None,
         },
         CaptureTask {
             id: "mp4-save".to_string(),
@@ -159,6 +166,7 @@ fn default_capture_tasks() -> Vec<CaptureTask> {
             capture_mode: TaskCaptureMode::RegionMp4,
             post_action: TaskPostAction::SaveFile,
             target_destination: None,
+            delay_ms: None,
         },
     ]
 }
@@ -1371,6 +1379,7 @@ mod tests {
             capture_mode: TaskCaptureMode::Region,
             post_action: TaskPostAction::SaveFile,
             target_destination: None,
+            delay_ms: None,
         });
 
         config.sanitize();

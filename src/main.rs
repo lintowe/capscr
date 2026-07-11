@@ -552,6 +552,7 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
                             capture_mode: config::TaskCaptureMode::RegionGif,
                             post_action: config::TaskPostAction::SaveFile,
                             target_destination: None,
+                            delay_ms: None,
                         };
                         if let Err(e) = commands::run_task(&task, &app) {
                             tracing::warn!("tray gif failed: {e}");
@@ -572,6 +573,7 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
                             capture_mode: config::TaskCaptureMode::RegionMp4,
                             post_action: config::TaskPostAction::SaveFile,
                             target_destination: None,
+                            delay_ms: None,
                         };
                         if let Err(e) = commands::run_task(&task, &app) {
                             tracing::warn!("tray mp4 failed: {e}");

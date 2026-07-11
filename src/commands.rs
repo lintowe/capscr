@@ -255,7 +255,7 @@ pub fn run_capture_pipeline(
     post: PostActionArg,
     app: &AppHandle,
 ) -> anyhow::Result<()> {
-    run_capture_pipeline_inner(mode, post, app, None)
+    run_capture_pipeline_inner(mode, post, app, None, None)
 }
 
 pub fn run_capture_pipeline_with_target(
@@ -263,8 +263,9 @@ pub fn run_capture_pipeline_with_target(
     post: PostActionArg,
     app: &AppHandle,
     upload_target: Option<crate::config::TaskUploadTarget>,
+    delay_override: Option<u32>,
 ) -> anyhow::Result<()> {
-    run_capture_pipeline_inner(mode, post, app, upload_target)
+    run_capture_pipeline_inner(mode, post, app, upload_target, delay_override)
 }
 
 fn run_capture_pipeline_inner(
@@ -272,6 +273,7 @@ fn run_capture_pipeline_inner(
     post: PostActionArg,
     app: &AppHandle,
     upload_target: Option<crate::config::TaskUploadTarget>,
+    delay_override: Option<u32>,
 ) -> anyhow::Result<()> {
     // cancel selection if already active
     if UnifiedSelector::active_selector_active() {
@@ -305,13 +307,16 @@ fn run_capture_pipeline_inner(
     // honour the configured pre-capture delay before capturing the freeze-frame
     // (used to set up menus / hover states before the snapshot is taken).
     {
-        let delay_ms = app
+        // a per-task delay overrides the global one; clamp so a hand-edited
+        // config can't stall the capture thread for minutes
+        let global_delay = app
             .state::<AppState>()
             .config
             .lock()
             .unwrap()
             .capture
             .delay_ms;
+        let delay_ms = delay_override.unwrap_or(global_delay).min(30_000);
         if delay_ms > 0 {
             std::thread::sleep(Duration::from_millis(delay_ms as u64));
         }
@@ -1807,7 +1812,7 @@ pub fn run_task(task: &CaptureTask, app: &AppHandle) -> anyhow::Result<()> {
         TaskCaptureMode::RegionGif | TaskCaptureMode::RegionMp4 => unreachable!("handled above"),
     };
     let post = PostActionArg::from_task_action(task.post_action);
-    run_capture_pipeline_with_target(mode, post, app, task.target_destination)
+    run_capture_pipeline_with_target(mode, post, app, task.target_destination, task.delay_ms)
 }
 
 use std::sync::atomic::{AtomicBool, Ordering};
