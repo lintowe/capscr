@@ -152,15 +152,20 @@ impl Mp4Streamer {
     }
 
     fn write_raw(&mut self, image: &RgbaImage, repeats: u64) -> Result<()> {
-        let resized = if image.width() != self.width || image.height() != self.height {
-            image::imageops::resize(
+        // only allocate when the frame actually needs resizing; the common case
+        // (region already at the encoder's even-adjusted size) writes the frame's
+        // own bytes instead of cloning a full width*height*4 buffer per frame
+        let resized;
+        let raw: &[u8] = if image.width() != self.width || image.height() != self.height {
+            resized = image::imageops::resize(
                 image,
                 self.width,
                 self.height,
                 image::imageops::FilterType::Triangle,
-            )
+            );
+            resized.as_raw()
         } else {
-            image.clone()
+            image.as_raw()
         };
         let stdin = self
             .stdin
@@ -168,7 +173,7 @@ impl Mp4Streamer {
             .ok_or_else(|| anyhow!("ffmpeg stdin closed"))?;
         for _ in 0..repeats {
             stdin
-                .write_all(resized.as_raw())
+                .write_all(raw)
                 .map_err(|e| anyhow!("Failed to write to ffmpeg stdin: {}", e))?;
         }
         self.frames_written += repeats;
