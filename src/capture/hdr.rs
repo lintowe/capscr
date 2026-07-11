@@ -1029,6 +1029,7 @@ mod windows_hdr {
     }
 
     pub fn prewarm_d3d_devices() {
+        use windows::Win32::Graphics::Dxgi::IDXGIOutput6;
         unsafe {
             let factory: IDXGIFactory1 = match CreateDXGIFactory1() {
                 Ok(f) => f,
@@ -1036,13 +1037,24 @@ mod windows_hdr {
             };
             let mut adapter_idx = 0u32;
             while let Ok(adapter) = factory.EnumAdapters1(adapter_idx) {
+                // only warm a device for an adapter that actually drives an HDR
+                // output — the cached D3D11 device is used solely by the HDR
+                // capture path, so on an all-SDR desktop it would sit resident
+                // for the whole process, never used, against the lightweight goal
                 let mut output_idx = 0u32;
-                let mut has_outputs = false;
-                while adapter.EnumOutputs(output_idx).is_ok() {
-                    has_outputs = true;
+                let mut has_hdr_output = false;
+                while let Ok(output) = adapter.EnumOutputs(output_idx) {
+                    if let Ok(output6) = output.cast::<IDXGIOutput6>() {
+                        if let Ok(desc1) = output6.GetDesc1() {
+                            let cs = desc1.ColorSpace.0;
+                            if cs == 12 || cs == 13 || cs == 14 {
+                                has_hdr_output = true;
+                            }
+                        }
+                    }
                     output_idx += 1;
                 }
-                if has_outputs {
+                if has_hdr_output {
                     let desc = match adapter.GetDesc1() {
                         Ok(d) => d,
                         Err(_) => {
