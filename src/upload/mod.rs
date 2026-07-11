@@ -699,10 +699,12 @@ const BLOCKED_HOSTS: &[&str] = &[
     "oastify.com",
 ];
 
-/// reject hosts that resolve to private / loopback / cloud-metadata IP ranges.
-/// resolves DNS twice (with a small sleep between) so a malicious resolver
-/// can't pass the check and then return a private IP on the real connect call.
-pub(crate) fn validate_resolved_host(host: &str, port: u16) -> Result<()> {
+/// reject hosts that resolve to private / loopback / cloud-metadata IP ranges,
+/// and return the vetted socket addresses. the caller must connect to these
+/// exact addresses rather than re-resolving the hostname: a rebinding resolver
+/// can hand a public IP to a validation-only lookup and a private one to the
+/// real connect, so pinning the checked address is what actually closes the gap.
+pub(crate) fn validate_resolved_host(host: &str, port: u16) -> Result<Vec<SocketAddr>> {
     let host_lower = host.to_lowercase();
     for blocked in BLOCKED_HOSTS {
         if host_lower == *blocked || host_lower.ends_with(&format!(".{}", blocked)) {
@@ -717,33 +719,20 @@ pub(crate) fn validate_resolved_host(host: &str, port: u16) -> Result<()> {
     }
 
     let host_with_port = format!("{}:{}", host, port);
-    let resolved: Vec<IpAddr> = host_with_port
+    let resolved: Vec<SocketAddr> = host_with_port
         .to_socket_addrs()
         .map_err(|e| anyhow!("Could not resolve hostname: {}", e))?
-        .map(|a| a.ip())
         .collect();
     if resolved.is_empty() {
         return Err(anyhow!("Could not resolve hostname"));
     }
-    for ip in &resolved {
-        if ImageUploader::is_private_ip(*ip) {
+    for addr in &resolved {
+        if ImageUploader::is_private_ip(addr.ip()) {
             return Err(anyhow!("Host resolves to private/internal IP"));
         }
     }
 
-    std::thread::sleep(Duration::from_millis(100));
-
-    let resolved_second: Vec<IpAddr> = host_with_port
-        .to_socket_addrs()
-        .map(|addrs| addrs.map(|a| a.ip()).collect())
-        .unwrap_or_default();
-    for ip in &resolved_second {
-        if ImageUploader::is_private_ip(*ip) {
-            return Err(anyhow!("DNS rebinding detected"));
-        }
-    }
-
-    Ok(())
+    Ok(resolved)
 }
 
 // classify whether an upload error is worth retrying. We retry on
@@ -791,10 +780,13 @@ pub fn test_connection_ftp(target: &FtpTarget) -> Result<Vec<TestStep>> {
         return Ok(steps);
     }
 
-    if let Err(e) = validate_resolved_host(&target.host, target.port.max(1)) {
-        steps.push(TestStep::fail("resolve-host", e.to_string()));
-        return Ok(steps);
-    }
+    let addrs = match validate_resolved_host(&target.host, target.port.max(1)) {
+        Ok(a) => a,
+        Err(e) => {
+            steps.push(TestStep::fail("resolve-host", e.to_string()));
+            return Ok(steps);
+        }
+    };
     steps.push(TestStep::ok(
         "resolve-host",
         format!("{}:{}", target.host, target.port.max(1)),
@@ -808,15 +800,15 @@ pub fn test_connection_ftp(target: &FtpTarget) -> Result<Vec<TestStep>> {
         return Ok(steps);
     }
 
-    let address = format!("{}:{}", target.host, target.port.max(1));
-    let mut stream = match FtpStream::connect(&address) {
+    // connect to the vetted address, not the hostname, so we can't be rebound
+    let mut stream = match FtpStream::connect(&addrs[..]) {
         Ok(s) => s,
         Err(e) => {
             steps.push(TestStep::fail("connect", e.to_string()));
             return Ok(steps);
         }
     };
-    steps.push(TestStep::ok("connect", address));
+    steps.push(TestStep::ok("connect", format!("{}:{}", target.host, target.port.max(1))));
 
     if let Err(e) = stream.login(&target.username, &target.password) {
         let _ = stream.quit();
@@ -858,10 +850,13 @@ pub fn test_connection_sftp(target: &SftpTarget) -> Result<Vec<TestStep>> {
         return Ok(steps);
     }
 
-    if let Err(e) = validate_resolved_host(&target.host, target.port.max(1)) {
-        steps.push(TestStep::fail("resolve-host", e.to_string()));
-        return Ok(steps);
-    }
+    let addrs = match validate_resolved_host(&target.host, target.port.max(1)) {
+        Ok(a) => a,
+        Err(e) => {
+            steps.push(TestStep::fail("resolve-host", e.to_string()));
+            return Ok(steps);
+        }
+    };
     steps.push(TestStep::ok(
         "resolve-host",
         format!("{}:{}", target.host, target.port.max(1)),
@@ -944,7 +939,9 @@ pub fn test_connection_sftp(target: &SftpTarget) -> Result<Vec<TestStep>> {
             inactivity_timeout: Some(std::time::Duration::from_secs(UPLOAD_TIMEOUT_SECS)),
             ..Default::default()
         });
-        let mut session = client::connect(config, (host.as_str(), port), handler)
+        // dial the vetted address, not the hostname; the host key is still
+        // verified against the hostname-keyed known_hosts entry
+        let mut session = client::connect(config, &addrs[..], handler)
             .await
             .map_err(|e| format!("{}", e))?;
         steps.push(TestStep::ok("connect", format!("{}:{}", host, port)));
@@ -1205,7 +1202,7 @@ pub fn upload_ftp(data: &[u8], file_name: &str, target: &FtpTarget) -> Result<Up
 
     validate_host(&target.host)?;
     validate_remote_dir(&target.remote_dir)?;
-    validate_resolved_host(&target.host, target.port.max(1))?;
+    let addrs = validate_resolved_host(&target.host, target.port.max(1))?;
     if target.use_tls {
         return Err(anyhow!(
             "FTPS not yet implemented; disable use_tls or use SFTP"
@@ -1216,10 +1213,11 @@ pub fn upload_ftp(data: &[u8], file_name: &str, target: &FtpTarget) -> Result<Up
     // traversal and so two captures at the same second don't collide.
     let safe = sanitize_remote_filename(file_name);
     let filename = uniquify_remote_filename(&safe);
-    let address = format!("{}:{}", target.host, target.port.max(1));
 
-    let mut stream = FtpStream::connect(&address)
-        .map_err(|e| anyhow!("FTP connect to {} failed: {}", address, e))?;
+    // connect to the vetted address, not the hostname, so we can't be rebound
+    let mut stream = FtpStream::connect(&addrs[..]).map_err(|e| {
+        anyhow!("FTP connect to {}:{} failed: {}", target.host, target.port.max(1), e)
+    })?;
 
     // helper to log out and tear down the socket no matter which step below
     // failed — without this the connection lingered until the OS GC'd it,
@@ -1293,7 +1291,7 @@ pub fn upload_sftp(data: &[u8], file_name: &str, target: &SftpTarget) -> Result<
 
     validate_host(&target.host)?;
     validate_remote_dir(&target.remote_dir)?;
-    validate_resolved_host(&target.host, target.port.max(1))?;
+    let addrs = validate_resolved_host(&target.host, target.port.max(1))?;
 
     let safe = sanitize_remote_filename(file_name);
     let filename = uniquify_remote_filename(&safe);
@@ -1377,7 +1375,9 @@ pub fn upload_sftp(data: &[u8], file_name: &str, target: &SftpTarget) -> Result<
             inactivity_timeout: Some(std::time::Duration::from_secs(UPLOAD_TIMEOUT_SECS)),
             ..Default::default()
         });
-        let mut session = client::connect(config, (host.as_str(), port), handler)
+        // dial the vetted address, not the hostname; the host key is still
+        // verified against the hostname-keyed known_hosts entry
+        let mut session = client::connect(config, &addrs[..], handler)
             .await
             .map_err(|e| anyhow!("SFTP connect to {}:{} failed: {}", host, port, e))?;
 
