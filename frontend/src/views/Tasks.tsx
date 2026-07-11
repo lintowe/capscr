@@ -288,11 +288,14 @@ export function Tasks() {
                                   const update: Partial<CaptureTask> = {
                                     capture_mode: mode,
                                   };
-                                  // editor post-action doesn't exist for
-                                  // recordings — fall back to save
+                                  // editor and ocr post-actions don't apply to
+                                  // recordings — fall back to save so the task
+                                  // isn't left on a filtered-out action that
+                                  // silently no-ops when it fires
                                   if (
                                     isRecordingMode(mode) &&
-                                    task.post_action === "open-editor"
+                                    (task.post_action === "open-editor" ||
+                                      task.post_action === "copy-text")
                                   ) {
                                     update.post_action = "save-file";
                                   }
