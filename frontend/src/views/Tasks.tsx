@@ -4,7 +4,7 @@ import { Plus, Save, Trash2, Zap } from "lucide-solid";
 import { api, AppConfig, CaptureTask, HotkeyDiagnostics } from "../api";
 import { configDirty, setConfigDirty } from "../dirty";
 import { HotkeyInput } from "../components/HotkeyInput";
-import { config, mutateConfig } from "../store";
+import { config, mutateConfig, refetchConfig } from "../store";
 
 const CAPTURE_MODES: { id: CaptureTask["capture_mode"]; label: string }[] = [
   { id: "region", label: "region (drag a rect)" },
@@ -67,6 +67,9 @@ export function Tasks() {
     const dupes = bound.filter((h, i) => bound.indexOf(h) !== i);
     if (dupes.length > 0) {
       setStatus({ tone: "err", msg: `duplicate hotkey: ${[...new Set(dupes)].join(", ")} — each task needs a unique key combo` });
+      // the rejected edit already mutated the in-memory store; pull the saved
+      // config back from disk so the UI stops showing the unsaved duplicate
+      refetchConfig();
       return;
     }
 
