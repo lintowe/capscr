@@ -971,15 +971,15 @@ export function Editor() {
               <ZoomIn size={11} stroke-width={1.5} />
             </button>
           </span>
-          <button class="btn" onClick={onSave} disabled={busy() !== null}>
+          <button class="btn" onClick={onSave} disabled={busy() !== null || !loaded()}>
             <Save size={12} stroke-width={1.5} />
             save
           </button>
-          <button class="btn" data-variant="ghost" onClick={onCopy} disabled={busy() !== null}>
+          <button class="btn" data-variant="ghost" onClick={onCopy} disabled={busy() !== null || !loaded()}>
             <Copy size={12} stroke-width={1.5} />
             copy
           </button>
-          <button class="btn" data-variant="ghost" onClick={onUpload} disabled={busy() !== null}>
+          <button class="btn" data-variant="ghost" onClick={onUpload} disabled={busy() !== null || !loaded()}>
             <Upload size={12} stroke-width={1.5} />
             upload
           </button>
