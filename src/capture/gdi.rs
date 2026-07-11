@@ -48,8 +48,16 @@ pub fn fast_gdi_capture(x: i32, y: i32, width: u32, height: u32) -> Result<RgbaI
             ReleaseDC(HWND::default(), screen_dc);
             return Err(anyhow!("CreateCompatibleDC failed"));
         }
-        let (bitmap, bits_ptr) = create_32bpp_dib(width as i32, height as i32)
-            .ok_or_else(|| anyhow!("create_32bpp_dib failed"))?;
+        let (bitmap, bits_ptr) = match create_32bpp_dib(width as i32, height as i32) {
+            Some(v) => v,
+            None => {
+                // release the DCs the other exits already clean up; the `?`
+                // shortcut here leaked them under gdi-handle/memory pressure
+                let _ = DeleteDC(mem_dc);
+                ReleaseDC(HWND::default(), screen_dc);
+                return Err(anyhow!("create_32bpp_dib failed"));
+            }
+        };
 
         let old_bitmap = SelectObject(mem_dc, bitmap);
         let ok = BitBlt(
