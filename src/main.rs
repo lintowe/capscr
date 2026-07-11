@@ -340,9 +340,12 @@ fn build_tray_menu<R: tauri::Runtime, M: tauri::Manager<R>>(app: &M) -> tauri::R
         .iter()
         .enumerate()
         .map(|(i, rec)| {
-            // truncate long URLs so the menu doesn't sprawl
-            let label = if rec.url.len() > 56 {
-                format!("{}…", &rec.url[..55])
+            // truncate long URLs so the menu doesn't sprawl. count/slice by
+            // char, not byte: a custom uploader's url comes from arbitrary
+            // server json and can hold multibyte utf-8, where a byte slice
+            // would panic on a non-boundary cut
+            let label = if rec.url.chars().count() > 56 {
+                format!("{}…", rec.url.chars().take(55).collect::<String>())
             } else {
                 rec.url.clone()
             };
