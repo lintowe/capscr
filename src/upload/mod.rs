@@ -1650,6 +1650,14 @@ pub fn upload_s3(data: &[u8], file_name: &str, target: &S3Target) -> Result<Uplo
     };
 
     let request_url = url::Url::parse(&request_url_str)?;
+    // the sigv4 auth header and the image both ride this request; refuse to send
+    // them over cleartext http if the user typed an http:// custom endpoint
+    if request_url.scheme() != "https" {
+        return Err(anyhow!(
+            "S3 endpoint must use https; refusing to send credentials over {}",
+            request_url.scheme()
+        ));
+    }
 
     let mut hasher = Sha256::new();
     hasher.update(data);
@@ -1778,6 +1786,22 @@ mod tests {
         assert!(auth_header.contains("Credential=AKIAIOSFODNN7EXAMPLE/20130524/us-east-1/s3/aws4_request"));
         assert!(auth_header.contains("SignedHeaders=host;x-amz-content-sha256;x-amz-date"));
         assert!(auth_header.contains("Signature="));
+    }
+
+    #[test]
+    fn s3_rejects_cleartext_http_endpoint() {
+        // an http:// custom endpoint is refused before any network call so the
+        // sigv4 credentials never go out in the clear
+        let target = S3Target {
+            bucket: "b".into(),
+            region: "us-east-1".into(),
+            endpoint: "http://minio.local:9000".into(),
+            access_key_id: "AK".into(),
+            secret_access_key: "SK".into(),
+            public_url_template: String::new(),
+        };
+        let err = upload_s3(b"x", "f.png", &target).unwrap_err();
+        assert!(err.to_string().contains("https"), "got: {err}");
     }
 
     #[test]
