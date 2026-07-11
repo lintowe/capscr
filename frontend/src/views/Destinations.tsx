@@ -254,22 +254,9 @@ export function Destinations() {
                   </div>
                 </div>
                 <div class="field">
-                  <label class="field-label">use tls</label>
+                  <label class="field-label">tls</label>
                   <div class="field-control">
-                    <label class="check">
-                      <input
-                        type="checkbox"
-                        checked={c().upload.ftp.use_tls}
-                        disabled
-                        onChange={(e) =>
-                          patch({
-                            ...c().upload,
-                            ftp: { ...c().upload.ftp, use_tls: e.currentTarget.checked },
-                          })
-                        }
-                      />
-                      <span class="check-label">plain ftp only — use sftp for an encrypted transfer</span>
-                    </label>
+                    <span class="field-hint">plain ftp only — use sftp for an encrypted transfer</span>
                   </div>
                 </div>
                 <div class="field">
