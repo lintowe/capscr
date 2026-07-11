@@ -117,6 +117,13 @@ pub fn set_config(
             config.upload.sftp.private_key_passphrase_encrypted =
                 stored.upload.sftp.private_key_passphrase_encrypted.clone();
         }
+        if config.upload.s3.secret_access_key.is_empty()
+            && config.upload.s3.secret_access_key_encrypted.is_empty()
+            && !stored.upload.s3.secret_access_key_encrypted.is_empty()
+        {
+            config.upload.s3.secret_access_key_encrypted =
+                stored.upload.s3.secret_access_key_encrypted.clone();
+        }
     }
     // the global hotkey kill switch lives in the atomic (the tray and Settings
     // toggle it there); make the persisted config agree with it so this save
