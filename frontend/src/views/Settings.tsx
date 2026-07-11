@@ -834,7 +834,6 @@ function NotifyPane(props: { c: AppConfig; patch: Patch }) {
                 props.patch("ui", {
                   ...c().ui,
                   close_behavior: val,
-                  minimize_to_tray: val === "minimize-to-taskbar",
                 });
               }}
             >

@@ -392,7 +392,6 @@ pub struct UiConfig {
     pub theme: Theme,
     pub show_notifications: bool,
     pub copy_to_clipboard: bool,
-    pub minimize_to_tray: bool,
     #[serde(default)]
     pub close_behavior: CloseBehavior,
     #[serde(default)]
@@ -413,7 +412,6 @@ impl Default for UiConfig {
             theme: Theme::Dark,
             show_notifications: true,
             copy_to_clipboard: true,
-            minimize_to_tray: true,
             close_behavior: CloseBehavior::MinimizeToTray,
             auto_start: true,
             check_updates_on_launch: true,
