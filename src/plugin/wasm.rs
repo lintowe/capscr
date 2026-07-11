@@ -66,6 +66,10 @@ struct HostState {
     /// filesystem, so this is how a plugin gets user-authored settings (webhook
     /// urls, styling, …) without a native fs
     config: std::collections::HashMap<String, String>,
+    /// owned by the store so the limiter closure can hand back a borrow instead
+    /// of leaking a fresh box on every memory.grow (wasmtime re-invokes the
+    /// closure per grow). cap is usize::MAX when the runtime set no memory cap
+    mem_limiter: MemLimiter,
 }
 
 /// capabilities a plugin declared in its `[capabilities]` manifest table,
@@ -208,12 +212,13 @@ impl WasmHost {
                 deadline_ticks,
                 fetch_deadline: None,
                 config,
+                mem_limiter: MemLimiter {
+                    cap: runtime.memory_max_bytes.unwrap_or(usize::MAX),
+                },
             },
         );
-        if let Some(limit) = runtime.memory_max_bytes {
-            store.limiter(move |_| {
-                Box::leak(Box::new(MemLimiter { cap: limit })) as &mut dyn wasmtime::ResourceLimiter
-            });
+        if runtime.memory_max_bytes.is_some() {
+            store.limiter(|data| &mut data.mem_limiter as &mut dyn wasmtime::ResourceLimiter);
         }
         // trap when the epoch deadline is exceeded — bumper thread advances
         // the engine epoch every 10ms, so HOOK_EPOCH_DEADLINE ticks ≈ 10ms.
