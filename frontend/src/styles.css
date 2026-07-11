@@ -2038,6 +2038,17 @@ kbd {
   display: block;
 }
 
+.pin-error {
+  max-width: 90%;
+  padding: 12px 16px;
+  border-radius: 4px;
+  background: rgba(20, 20, 20, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 12px;
+  text-align: center;
+}
+
 .pin-controls {
   position: absolute;
   top: 8px;

@@ -9,37 +9,55 @@ export function PinView(props: { label: string }) {
   const [imagePath, setImagePath] = createSignal<string | null>(null);
   const [opacity, setOpacity] = createSignal<number>(1.0);
   const [hovered, setHovered] = createSignal(false);
+  const [error, setError] = createSignal<string | null>(null);
+
+  // the pin window is created hidden and revealed once we know its size. every
+  // path has to reach a reveal, or a failed load leaves an invisible window the
+  // user can't find to close.
+  const reveal = async (w?: number, h?: number) => {
+    const win = getCurrentWindow();
+    if (w && h) {
+      await win.setSize(new LogicalSize(w, h)).catch(() => {});
+    }
+    await win.show().catch(() => {});
+  };
 
   onMount(() => {
     api.getPinnedImagePath(props.label)
       .then((path) => {
-        if (path) {
-          setImagePath(path);
-          // Load image to read its natural width & height, then resize the window
-          const img = new Image();
-          img.onload = () => {
-            let w = img.naturalWidth;
-            let h = img.naturalHeight;
-
-            // Optional: cap size at 85% of screen dimensions to keep it reasonable
-            const maxW = window.screen.availWidth * 0.85;
-            const maxH = window.screen.availHeight * 0.85;
-            if (w > maxW || h > maxH) {
-              const ratio = Math.min(maxW / w, maxH / h);
-              w = Math.round(w * ratio);
-              h = Math.round(h * ratio);
-            }
-
-            const win = getCurrentWindow();
-            win.setSize(new LogicalSize(w, h)).then(() => {
-              win.show();
-            });
-          };
-          img.src = convertFileSrc(path);
+        if (!path) {
+          setError("this pin's image is no longer available");
+          reveal(320, 120);
+          return;
         }
+        setImagePath(path);
+        // Load image to read its natural width & height, then resize the window
+        const img = new Image();
+        img.onload = () => {
+          let w = img.naturalWidth;
+          let h = img.naturalHeight;
+
+          // Optional: cap size at 85% of screen dimensions to keep it reasonable
+          const maxW = window.screen.availWidth * 0.85;
+          const maxH = window.screen.availHeight * 0.85;
+          if (w > maxW || h > maxH) {
+            const ratio = Math.min(maxW / w, maxH / h);
+            w = Math.round(w * ratio);
+            h = Math.round(h * ratio);
+          }
+          reveal(w, h);
+        };
+        img.onerror = () => {
+          setImagePath(null);
+          setError("couldn't load this pin's image");
+          reveal(320, 120);
+        };
+        img.src = convertFileSrc(path);
       })
       .catch((e) => {
         console.error("Failed to load pinned image path:", e);
+        setError("couldn't load this pin");
+        reveal(320, 120);
       });
   });
 
@@ -50,18 +68,19 @@ export function PinView(props: { label: string }) {
   return (
     <div
       class="pin-container"
-      style={{ opacity: opacity() }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
-      <div data-tauri-drag-region class="pin-drag-region">
-        {imagePath() && (
+      <div data-tauri-drag-region class="pin-drag-region" style={{ opacity: opacity() }}>
+        {imagePath() ? (
           <img
             src={convertFileSrc(imagePath()!)}
             alt="pinned"
             class="pin-image"
             draggable={false}
           />
+        ) : (
+          <div class="pin-error">{error() ?? "nothing pinned"}</div>
         )}
       </div>
       <Show when={hovered()}>
