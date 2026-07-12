@@ -6,6 +6,11 @@ import { api, AppConfig, ConnectionTestReport } from "../api";
 import { configDirty, setConfigDirty } from "../dirty";
 import { config, mutateConfig } from "../store";
 import { commitNumber } from "../num";
+import { IS_LINUX } from "../keys";
+
+// the secret-at-rest backend differs per platform: DPAPI blobs on windows,
+// the freedesktop secret service (login keyring) on linux
+const VAULT = IS_LINUX ? "the system keyring" : "Windows DPAPI";
 
 export function Destinations() {
   const [status, setStatus] = createSignal<{ tone: string; msg: string } | null>(
@@ -242,8 +247,8 @@ export function Destinations() {
                     />
                     <span class="field-hint">
                       {c().upload.ftp.password_encrypted
-                        ? "encrypted at rest with Windows DPAPI (per-user)"
-                        : "encrypted at rest with Windows DPAPI on save"}
+                        ? `encrypted at rest with ${VAULT} (per-user)`
+                        : `encrypted at rest with ${VAULT} on save`}
                     </span>
                   </div>
                 </div>
@@ -436,7 +441,7 @@ export function Destinations() {
                         }
                       />
                       <span class="field-hint">
-                        encrypted at rest with Windows DPAPI on save.
+                        encrypted at rest with {VAULT} on save.
                       </span>
                     </div>
                   </div>
@@ -461,8 +466,8 @@ export function Destinations() {
                     />
                     <span class="field-hint">
                       {c().upload.sftp.password_encrypted
-                        ? "encrypted at rest with Windows DPAPI (per-user)"
-                        : "encrypted at rest with Windows DPAPI on save"}
+                        ? `encrypted at rest with ${VAULT} (per-user)`
+                        : `encrypted at rest with ${VAULT} on save`}
                     </span>
                   </div>
                 </div>
@@ -610,7 +615,7 @@ export function Destinations() {
                     />
                     <Show when={c().upload.s3?.secret_access_key_encrypted}>
                       <span class="field-hint text-live">
-                        DPAPI encrypted vault populated
+                        encrypted vault populated
                       </span>
                     </Show>
                   </div>

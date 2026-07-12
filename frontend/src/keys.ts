@@ -77,12 +77,19 @@ export function eventToHotkey(e: KeyboardEvent): HotkeyParts | null {
   };
 }
 
-/** Split an existing hotkey string into parts for chip rendering. */
+// stored hotkey strings keep the canonical backend format ("Win+...") on
+// every platform; only the label shown to the user follows the platform's
+// name for the key
+export const IS_LINUX = navigator.userAgent.includes("Linux");
+export const META_LABEL = IS_LINUX ? "Super" : "Win";
+
+/** Split an existing hotkey string into display parts for chip rendering. */
 export function splitHotkey(s: string): string[] {
   return s
     .split("+")
     .map((p) => p.trim())
-    .filter(Boolean);
+    .filter(Boolean)
+    .map((p) => (p === "Win" ? META_LABEL : p));
 }
 
 /**

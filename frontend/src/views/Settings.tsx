@@ -7,6 +7,7 @@ import { configDirty, setConfigDirty } from "../dirty";
 import { FolderOpen, RotateCcw, Save } from "lucide-solid";
 import { config, mutateConfig } from "../store";
 import { commitNumber } from "../num";
+import { IS_LINUX } from "../keys";
 
 type Pane = "general" | "capture" | "hdr" | "hotkeys" | "ssh" | "notify";
 
@@ -650,6 +651,8 @@ function HotkeysPane(props: { c: AppConfig }) {
         </div>
       </Section>
 
+      {/* the LL keyboard hook is windows machinery — no section to debug elsewhere */}
+      <Show when={!IS_LINUX}>
       <Section title="ll-hook telemetry (debug)">
         <p class="lede">
           live counters from the low-level keyboard hook. press any key and
@@ -715,6 +718,7 @@ function HotkeysPane(props: { c: AppConfig }) {
           </Show>
         </Show>
       </Section>
+      </Show>
     </>
   );
 }
@@ -835,7 +839,7 @@ function NotifyPane(props: { c: AppConfig; patch: Patch }) {
               />
               <span class="check-label">
                 {c().post_capture.play_sound
-                  ? "win32 playsound on capture / upload"
+                  ? "sound cue on capture / upload"
                   : "silent"}
               </span>
             </label>

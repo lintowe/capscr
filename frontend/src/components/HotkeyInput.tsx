@@ -4,6 +4,7 @@ import { X } from "lucide-solid";
 import {
   splitHotkey,
   eventToHotkey,
+  META_LABEL,
 } from "../keys";
 import { api } from "../api";
 
@@ -32,7 +33,8 @@ const RISKY_BARE_OK = new Set([
  * Click → arms the backend LL hook to capture the next non-modifier
  * keydown → records the exact vk Windows delivers (so NumLock state,
  * FN-modified laptop keys, and unusual layouts all bind correctly).
- * Esc cancels. Backspace clears.
+ * On linux the backend has no hook to arm and the browser-side keydown
+ * capture below records the chord instead. Esc cancels. Backspace clears.
  */
 export function HotkeyInput(props: Props) {
   const [capturing, setCapturing] = createSignal(false);
@@ -61,7 +63,7 @@ export function HotkeyInput(props: Props) {
     const hasModifier = payload.mods !== 0;
     if (!hasModifier && !RISKY_BARE_OK.has(stripped)) {
       setWarning(
-        `${payload.hotkey} would steal that key from every app — add a modifier (Ctrl / Alt / Shift / Win).`,
+        `${payload.hotkey} would steal that key from every app — add a modifier (Ctrl / Alt / Shift / ${META_LABEL}).`,
       );
       // re-arm for another attempt
       void api.startHotkeyCapture().catch((e) => {

@@ -39,10 +39,11 @@ export interface FtpConfig {
   port: number;
   username: string;
   /** plaintext password as typed by the user. on every save, set_config
-   *  encrypts this into password_encrypted via Windows DPAPI and clears
-   *  it from disk. An empty string here means "keep the current vault" */
+   *  moves this into password_encrypted via the platform secret store
+   *  (DPAPI on windows, Secret Service on linux) and clears it from disk.
+   *  An empty string here means "keep the current vault" */
   password: string;
-  /** DPAPI-wrapped hex blob. read-only from the frontend's perspective —
+  /** secret-store blob. read-only from the frontend's perspective —
    *  set by the backend on save, used as a "vault populated" sentinel */
   password_encrypted: string;
   remote_dir: string;
@@ -56,7 +57,7 @@ export interface SftpConfig {
   username: string;
   /** plaintext password — same vault treatment as FtpConfig.password */
   password: string;
-  /** DPAPI-wrapped hex blob */
+  /** secret-store blob */
   password_encrypted: string;
   remote_dir: string;
   public_url_template: string;
@@ -65,7 +66,7 @@ export interface SftpConfig {
   private_key_path: string;
   /** passphrase for an encrypted key. same vault treatment as `password` */
   private_key_passphrase: string;
-  /** DPAPI-wrapped passphrase blob */
+  /** secret-store passphrase blob */
   private_key_passphrase_encrypted: string;
 }
 
