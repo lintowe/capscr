@@ -370,22 +370,32 @@ impl HotkeyManager {
     // shows an honest per-task status instead of a silently dead binding.
     #[cfg(target_os = "linux")]
     pub fn flush_to_hook(&mut self) {
-        // global-hotkey's X11 backend dereferences a null display whenever
-        // XOpenDisplay fails (segfaults the process), so never construct it
-        // unless an X server actually answers — DISPLAY being set is not
-        // enough, it can point at a dead socket. wayland-native hotkeys need
-        // the GlobalShortcuts portal, which isn't wired up yet.
+        // two hard constraints gate X11 registration:
+        // - global-hotkey's X11 backend dereferences a null display whenever
+        //   XOpenDisplay fails (segfaults the process), so it must never be
+        //   constructed unless an X server actually answers — DISPLAY being
+        //   set is not enough, it can point at a dead socket
+        // - under a wayland session, grabs land on XWayland and only fire
+        //   while an X client is focused; a binding that works one window in
+        //   three is worse than an honest failure. wayland-native hotkeys
+        //   need the GlobalShortcuts portal, which isn't wired up yet.
+        let wayland = std::env::var("WAYLAND_DISPLAY").is_ok()
+            || std::env::var("XDG_SESSION_TYPE").map(|t| t == "wayland").unwrap_or(false);
         let x11_reachable =
             std::env::var("DISPLAY").is_ok() && x11rb::connect(None).is_ok();
-        if !x11_reachable {
+        if wayland || !x11_reachable {
+            let reason = if wayland {
+                "global hotkeys aren't available on wayland sessions yet; \
+                 use the tray menu or capscr --jump instead"
+            } else {
+                "no X11 display — global hotkeys need a running X server; \
+                 use the tray menu or capscr --jump instead"
+            };
             for (task_id, (_, hotkey_str)) in self.registered.drain() {
                 self.registration_errors.push(HotkeyRegistrationError {
                     task_id,
                     hotkey: hotkey_str,
-                    reason: "no X11 display — global hotkeys aren't available on \
-                             wayland-only sessions yet; use the tray menu or \
-                             capscr --jump instead"
-                        .into(),
+                    reason: reason.into(),
                 });
             }
             return;
