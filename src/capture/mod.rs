@@ -15,6 +15,8 @@ mod wgc;
 mod window;
 
 pub use cursor::{capture_cursor_shot, composite_cursor_shot, composite_system_cursor};
+#[cfg(not(windows))]
+pub use cursor::pointer_position;
 #[cfg(windows)]
 pub use d2d_tonemap::capture_hdr_to_sdr_sweep;
 #[cfg(windows)]
@@ -311,6 +313,28 @@ pub struct WindowInfo {
     pub height: u32,
 }
 
+// map an xcap monitor into capscr's MonitorInfo. accessors return results
+// from xcap 0.9 on; a failing field fails the mapping rather than fabricating
+// a monitor with zeroed geometry
+pub(crate) fn monitor_info(m: &xcap::Monitor) -> Result<MonitorInfo> {
+    Ok(MonitorInfo {
+        id: m.id()?,
+        name: m.name()?,
+        x: m.x()?,
+        y: m.y()?,
+        width: m.width()?,
+        height: m.height()?,
+        is_primary: m.is_primary()?,
+    })
+}
+
+pub(crate) fn find_xcap_monitor(id: u32) -> Result<xcap::Monitor> {
+    xcap::Monitor::all()?
+        .into_iter()
+        .find(|s| s.id().map(|i| i == id).unwrap_or(false))
+        .ok_or_else(|| anyhow::anyhow!("monitor {id} not found"))
+}
+
 pub fn list_monitors() -> Result<Vec<MonitorInfo>> {
     #[cfg(windows)]
     {
@@ -319,19 +343,7 @@ pub fn list_monitors() -> Result<Vec<MonitorInfo>> {
         }
     }
     let screens = xcap::Monitor::all()?;
-    let monitors: Vec<MonitorInfo> = screens
-        .into_iter()
-        .map(|s| MonitorInfo {
-            id: s.id(),
-            name: s.name().to_string(),
-            x: s.x(),
-            y: s.y(),
-            width: s.width(),
-            height: s.height(),
-            is_primary: s.is_primary(),
-        })
-        .collect();
-    Ok(monitors)
+    screens.iter().map(monitor_info).collect()
 }
 
 // run a 4-byte-per-pixel conversion from src into dst, splitting the work
@@ -438,11 +450,7 @@ pub fn capture_one_monitor(monitor: &MonitorInfo) -> Result<RgbaImage> {
             Ok(img) => Ok(img),
             Err(e) => {
                 tracing::warn!("fast GDI capture failed — falling back to xcap: {e:#}");
-                let screens = xcap::Monitor::all()?;
-                let screen = screens
-                    .into_iter()
-                    .find(|s| s.id() == monitor.id)
-                    .ok_or_else(|| anyhow::anyhow!("xcap monitor not found"))?;
+                let screen = find_xcap_monitor(monitor.id)?;
                 screen.capture_image().map_err(|e| anyhow::anyhow!("{e}"))
             }
         }
@@ -495,11 +503,7 @@ pub fn capture_one_monitor(monitor: &MonitorInfo) -> Result<RgbaImage> {
 // silently producing an empty capture.
 #[cfg(not(windows))]
 pub fn capture_one_monitor(monitor: &MonitorInfo) -> Result<RgbaImage> {
-    let screens = xcap::Monitor::all()?;
-    let screen = screens
-        .into_iter()
-        .find(|s| s.id() == monitor.id)
-        .ok_or_else(|| anyhow::anyhow!("monitor {} not found", monitor.id))?;
+    let screen = find_xcap_monitor(monitor.id)?;
     let raw = screen.capture_image()?;
     let mut img = orient_captured_image(raw, monitor.width, monitor.height, monitor.x, monitor.y);
     ensure_opaque_if_fully_transparent(&mut img);

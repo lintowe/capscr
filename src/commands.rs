@@ -493,13 +493,39 @@ fn run_capture_pipeline_inner(
                 }
                 #[cfg(not(windows))]
                 {
-                    // window bounds come from the compositor here, not DWM;
-                    // crop-from-frozen lands together with the linux selector
-                    let _ = frozen;
-                    let cap = WindowCapture::new(hwnd);
-                    let img = cap.capture()?;
-                    let origin = window_screen_origin(hwnd);
-                    (img, None, origin)
+                    // crop the window's rect out of the frozen frame so the
+                    // pixels match what the selector showed; a live window
+                    // capture is the fallback when bounds are unavailable
+                    let cropped = window_bounds(hwnd).and_then(|(w_x, w_y, w_w, w_h)| {
+                        let monitors = crate::capture::list_monitors().unwrap_or_default();
+                        let min_x = monitors.iter().map(|m| m.x).min().unwrap_or(0);
+                        let min_y = monitors.iter().map(|m| m.y).min().unwrap_or(0);
+                        let img_x = (w_x - min_x).max(0) as u32;
+                        let img_y = (w_y - min_y).max(0) as u32;
+                        let crop_width = w_w.min(frozen.width().saturating_sub(img_x));
+                        let crop_height = w_h.min(frozen.height().saturating_sub(img_y));
+                        if crop_width == 0 || crop_height == 0 {
+                            return None;
+                        }
+                        let img = image::imageops::crop_imm(
+                            &**frozen,
+                            img_x,
+                            img_y,
+                            crop_width,
+                            crop_height,
+                        )
+                        .to_image();
+                        Some((img, None, Some((w_x, w_y))))
+                    });
+                    match cropped {
+                        Some(result) => result,
+                        None => {
+                            let cap = WindowCapture::new(hwnd);
+                            let img = cap.capture()?;
+                            let origin = window_screen_origin(hwnd);
+                            (img, None, origin)
+                        }
+                    }
                 }
             } else {
                 let cap = WindowCapture::new(hwnd);
@@ -793,29 +819,41 @@ fn cursor_position() -> Option<(i32, i32)> {
 
 #[cfg(not(windows))]
 fn cursor_position() -> Option<(i32, i32)> {
-    None
+    crate::capture::pointer_position()
 }
 
 fn window_screen_origin(window_id: u32) -> Option<(i32, i32)> {
     let windows = xcap::Window::all().ok()?;
-    windows
+    let w = windows
         .into_iter()
-        .find(|w| w.id() == window_id)
-        .map(|w| (w.x(), w.y()))
+        .find(|w| w.id().map(|i| i == window_id).unwrap_or(false))?;
+    Some((w.x().ok()?, w.y().ok()?))
+}
+
+// full window rect from the compositor, used to crop a window capture out of
+// the frozen frame on platforms without DWM extended-frame bounds
+#[cfg(not(windows))]
+fn window_bounds(window_id: u32) -> Option<(i32, i32, u32, u32)> {
+    let windows = xcap::Window::all().ok()?;
+    let w = windows
+        .into_iter()
+        .find(|w| w.id().map(|i| i == window_id).unwrap_or(false))?;
+    Some((w.x().ok()?, w.y().ok()?, w.width().ok()?, w.height().ok()?))
 }
 
 fn active_monitor_origin() -> Option<(i32, i32)> {
+    let origin_of = |m: xcap::Monitor| Some((m.x().ok()?, m.y().ok()?));
     let (cx, cy) = cursor_position()?;
     xcap::Monitor::from_point(cx, cy)
         .ok()
-        .map(|m| (m.x(), m.y()))
+        .and_then(origin_of)
         .or_else(|| {
             // fallback to primary if the cursor lookup failed.
             xcap::Monitor::all()
                 .ok()?
                 .into_iter()
-                .find(|m| m.is_primary())
-                .map(|m| (m.x(), m.y()))
+                .find(|m| m.is_primary().unwrap_or(false))
+                .and_then(origin_of)
         })
 }
 

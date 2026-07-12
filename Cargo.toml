@@ -40,8 +40,9 @@ global-hotkey = "0.6"
 # laptop batteries.
 crossbeam-channel = "0.5"
 
-# Screen capture
-xcap = "0.0.14"
+# Screen capture. 0.9 brings real Linux backends (X11 via xcb, Wayland via
+# portal/pipewire); every accessor returns XCapResult from this version on
+xcap = "0.9"
 
 # image processing and formats. tauri pulls image with its default features for
 # icon handling, and cargo unifies features additively, so the full codec set is
@@ -117,6 +118,11 @@ russh-sftp = { version = "2", optional = true }
 # HDR-preserved output (Phase 10 will add JXL/AVIF; pure-rust PNG cICP is fine here)
 png = "0.17"
 
+[target.'cfg(target_os = "linux")'.dependencies]
+# X11 cursor snapshot (XFixes) + pointer position. already a transitive dep
+# of arboard, so this adds no new code to the build
+x11rb = { version = "0.13", features = ["xfixes"] }
+
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.58", features = [
     "Win32_Foundation",
@@ -140,6 +146,7 @@ windows = { version = "0.58", features = [
     "Win32_System_WinRT_Direct3D11",
     "Win32_System_WinRT_Graphics_Capture",
     "Win32_Graphics_Gdi",
+    "Win32_Graphics_Dwm",
     "Win32_Graphics_Dxgi",
     "Win32_Graphics_Dxgi_Common",
     "Win32_Graphics_Direct3D11",

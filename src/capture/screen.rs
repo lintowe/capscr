@@ -33,10 +33,10 @@ impl ScreenCapture {
         let monitors = Monitor::all()?;
         let primary = monitors
             .into_iter()
-            .find(|m| m.is_primary())
+            .find(|m| m.is_primary().unwrap_or(false))
             .ok_or_else(|| anyhow!("No primary monitor found"))?;
         Ok(Self {
-            monitor_id: Some(primary.id()),
+            monitor_id: Some(primary.id()?),
         })
     }
 
@@ -55,7 +55,7 @@ impl ScreenCapture {
         }
         let monitor = Monitor::from_point(x, y)?;
         Ok(Self {
-            monitor_id: Some(monitor.id()),
+            monitor_id: Some(monitor.id()?),
         })
     }
 
@@ -65,21 +65,7 @@ impl ScreenCapture {
         #[cfg(windows)]
         let monitors = super::fast_list_monitors()?;
         #[cfg(not(windows))]
-        let monitors = {
-            let screens = Monitor::all()?;
-            screens
-                .into_iter()
-                .map(|s| super::MonitorInfo {
-                    id: s.id(),
-                    name: s.name().to_string(),
-                    x: s.x(),
-                    y: s.y(),
-                    width: s.width(),
-                    height: s.height(),
-                    is_primary: s.is_primary(),
-                })
-                .collect::<Vec<_>>()
-        };
+        let monitors = super::list_monitors()?;
 
         if monitors.is_empty() {
             return Err(anyhow!("No monitors found"));
@@ -164,20 +150,18 @@ impl ScreenCapture {
 
         #[cfg(not(windows))]
         for monitor in &monitors {
-            let screens = Monitor::all()?;
-            let screen = match screens.into_iter().find(|s| s.id() == monitor.id) {
-                Some(s) => s,
-                None => continue,
-            };
-            let img = match screen.capture_image() {
-                Ok(i) => super::orient_captured_image(
-                    i,
-                    monitor.width,
-                    monitor.height,
-                    monitor.x,
-                    monitor.y,
-                ),
-                Err(_) => continue,
+            let img = match super::capture_one_monitor(monitor) {
+                Ok(i) => i,
+                Err(e) => {
+                    tracing::warn!(
+                        "capture_one_monitor failed for {}x{}+{}+{}: {e:#}",
+                        monitor.width,
+                        monitor.height,
+                        monitor.x,
+                        monitor.y,
+                    );
+                    continue;
+                }
             };
             let offset_x_i32 = monitor.x.saturating_sub(min_x);
             let offset_y_i32 = monitor.y.saturating_sub(min_y);
@@ -198,11 +182,11 @@ impl ScreenCapture {
         match self.monitor_id {
             Some(id) => monitors
                 .into_iter()
-                .find(|m| m.id() == id)
+                .find(|m| m.id().map(|i| i == id).unwrap_or(false))
                 .ok_or_else(|| anyhow!("Monitor {} not found", id)),
             None => monitors
                 .into_iter()
-                .find(|m| m.is_primary())
+                .find(|m| m.is_primary().unwrap_or(false))
                 .or_else(|| Monitor::all().ok()?.into_iter().next())
                 .ok_or_else(|| anyhow!("No monitors found")),
         }
@@ -225,15 +209,7 @@ impl ScreenCapture {
             }
         }
         let monitor = self.find_monitor()?;
-        Ok(MonitorInfo {
-            id: monitor.id(),
-            name: monitor.name().to_string(),
-            x: monitor.x(),
-            y: monitor.y(),
-            width: monitor.width(),
-            height: monitor.height(),
-            is_primary: monitor.is_primary(),
-        })
+        super::monitor_info(&monitor)
     }
 }
 
@@ -250,19 +226,7 @@ impl Capture for ScreenCapture {
     fn capture(&self) -> Result<RgbaImage> {
         let monitor_info = self.get_monitor_info()?;
 
-        #[cfg(windows)]
         let img = super::capture_one_monitor(&monitor_info)?;
-        #[cfg(not(windows))]
-        let img = {
-            let m = self.find_monitor()?;
-            super::orient_captured_image(
-                m.capture_image()?,
-                monitor_info.width,
-                monitor_info.height,
-                monitor_info.x,
-                monitor_info.y,
-            )
-        };
 
         if img.width() > MAX_CAPTURE_DIMENSION || img.height() > MAX_CAPTURE_DIMENSION {
             return Err(anyhow!("Captured image dimensions exceed safety limit"));

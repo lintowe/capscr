@@ -20,10 +20,10 @@ impl WindowCapture {
         let windows = Window::all()?;
         let window = windows
             .into_iter()
-            .find(|w| w.title().contains(title))
+            .find(|w| w.title().map(|t| t.contains(title)).unwrap_or(false))
             .ok_or_else(|| anyhow!("Window with title '{}' not found", title))?;
         Ok(Self {
-            window_id: window.id(),
+            window_id: window.id()?,
         })
     }
 
@@ -32,10 +32,13 @@ impl WindowCapture {
         let windows = Window::all()?;
         let window = windows
             .into_iter()
-            .find(|w| !w.is_minimized() && !w.title().is_empty())
+            .find(|w| {
+                !w.is_minimized().unwrap_or(true)
+                    && !w.title().map(|t| t.is_empty()).unwrap_or(true)
+            })
             .ok_or_else(|| anyhow!("No focused window found"))?;
         Ok(Self {
-            window_id: window.id(),
+            window_id: window.id()?,
         })
     }
 
@@ -43,7 +46,7 @@ impl WindowCapture {
         let windows = Window::all()?;
         windows
             .into_iter()
-            .find(|w| w.id() == self.window_id)
+            .find(|w| w.id().map(|i| i == self.window_id).unwrap_or(false))
             .ok_or_else(|| anyhow!("Window {} not found", self.window_id))
     }
 
@@ -52,17 +55,21 @@ impl WindowCapture {
         let windows = Window::all()?;
         let mut app_windows: Vec<WindowInfo> = windows
             .into_iter()
-            .filter(|w| {
-                !w.title().is_empty() && w.width() > 50 && w.height() > 50 && !w.is_minimized()
-            })
-            .map(|w| WindowInfo {
-                id: w.id(),
-                title: w.title().to_string(),
-                app_name: w.app_name().to_string(),
-                x: w.x(),
-                y: w.y(),
-                width: w.width(),
-                height: w.height(),
+            .filter_map(|w| {
+                let title = w.title().ok()?;
+                let (width, height) = (w.width().ok()?, w.height().ok()?);
+                if title.is_empty() || width <= 50 || height <= 50 || w.is_minimized().ok()? {
+                    return None;
+                }
+                Some(WindowInfo {
+                    id: w.id().ok()?,
+                    title,
+                    app_name: w.app_name().ok()?,
+                    x: w.x().ok()?,
+                    y: w.y().ok()?,
+                    width,
+                    height,
+                })
             })
             .collect();
 

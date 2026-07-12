@@ -1,7 +1,7 @@
-// captures the system cursor from Win32 and alpha-composites it onto a
-// captured RgbaImage at the right screen-relative position. used by the
-// capture pipeline when config.capture.show_cursor is enabled, for both still
-// captures and recordings. non-windows falls back to a no-op
+// captures the system cursor (Win32 DrawIconEx / X11 XFixes) and
+// alpha-composites it onto a captured RgbaImage at the right screen-relative
+// position. used by the capture pipeline when config.capture.show_cursor is
+// enabled, for both still captures and recordings
 
 use image::RgbaImage;
 
@@ -22,22 +22,22 @@ impl CursorShot {
 }
 
 // snapshot the current system cursor. returns None if the cursor is hidden,
-// unresolvable, or any Win32 call fails — cursor capture must never take down a
-// screen capture. always None off windows
+// unresolvable, or any platform call fails — cursor capture must never take
+// down a screen capture
 pub fn capture_cursor_shot() -> Option<CursorShot> {
     #[cfg(windows)]
-    {
-        let (image, screen_x, screen_y) = windows_impl::fetch_cursor()?;
-        Some(CursorShot {
-            image,
-            screen_x,
-            screen_y,
-        })
-    }
-    #[cfg(not(windows))]
-    {
-        None
-    }
+    let fetched = windows_impl::fetch_cursor();
+    #[cfg(target_os = "linux")]
+    let fetched = x11_impl::fetch_cursor();
+    #[cfg(not(any(windows, target_os = "linux")))]
+    let fetched: Option<(RgbaImage, i32, i32)> = None;
+
+    let (image, screen_x, screen_y) = fetched?;
+    Some(CursorShot {
+        image,
+        screen_x,
+        screen_y,
+    })
 }
 
 // composite a previously captured cursor onto `image`. `screen_origin` is the
@@ -328,6 +328,61 @@ mod windows_impl {
             let screen_y = info.ptScreenPos.y - icon_info.yHotspot as i32;
             Some((img, screen_x, screen_y))
         }
+    }
+}
+
+#[cfg(target_os = "linux")]
+mod x11_impl {
+    use image::RgbaImage;
+    use x11rb::connection::Connection;
+    use x11rb::protocol::xfixes::ConnectionExt as _;
+    use x11rb::protocol::xproto::ConnectionExt as _;
+
+    // XFixes GetCursorImage: one reply carries the cursor bitmap
+    // (premultiplied ARGB, which matches composite_at's premultiplied blend),
+    // the pointer position, and the hotspot. wayland compositors don't expose
+    // a global cursor and XWayland only tracks it over X windows, so None is
+    // a normal answer there
+    pub fn fetch_cursor() -> Option<(RgbaImage, i32, i32)> {
+        let (conn, _screen) = x11rb::connect(None).ok()?;
+        // the protocol requires a version handshake before any other request
+        conn.xfixes_query_version(5, 0).ok()?.reply().ok()?;
+        let img = conn.xfixes_get_cursor_image().ok()?.reply().ok()?;
+        let (w, h) = (img.width as u32, img.height as u32);
+        if w == 0 || h == 0 || w > 256 || h > 256 {
+            return None;
+        }
+        let mut rgba = Vec::with_capacity((w * h * 4) as usize);
+        for px in &img.cursor_image {
+            // each u32 is ARGB with alpha in the high byte
+            let [b, g, r, a] = px.to_le_bytes();
+            rgba.extend_from_slice(&[r, g, b, a]);
+        }
+        let image = RgbaImage::from_raw(w, h, rgba)?;
+        let screen_x = img.x as i32 - img.xhot as i32;
+        let screen_y = img.y as i32 - img.yhot as i32;
+        Some((image, screen_x, screen_y))
+    }
+
+    // global pointer position in root-window coordinates
+    pub fn pointer_position() -> Option<(i32, i32)> {
+        let (conn, screen_num) = x11rb::connect(None).ok()?;
+        let root = conn.setup().roots.get(screen_num)?.root;
+        let reply = conn.query_pointer(root).ok()?.reply().ok()?;
+        Some((reply.root_x as i32, reply.root_y as i32))
+    }
+}
+
+// global pointer position where the platform can answer it. wayland can't
+// (by design), which callers treat as "fall back to the primary monitor"
+pub fn pointer_position() -> Option<(i32, i32)> {
+    #[cfg(target_os = "linux")]
+    {
+        x11_impl::pointer_position()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        None
     }
 }
 

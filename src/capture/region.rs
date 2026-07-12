@@ -1,6 +1,5 @@
 use anyhow::{anyhow, Result};
 use image::{GenericImage, RgbaImage};
-use xcap::Monitor;
 
 use super::{Capture, Rectangle};
 
@@ -34,9 +33,9 @@ impl RegionCapture {
                 return (min_x, min_y);
             }
         }
-        if let Ok(monitors) = Monitor::all() {
-            let min_x = monitors.iter().map(|m| m.x()).min().unwrap_or(0);
-            let min_y = monitors.iter().map(|m| m.y()).min().unwrap_or(0);
+        if let Ok(monitors) = super::list_monitors() {
+            let min_x = monitors.iter().map(|m| m.x).min().unwrap_or(0);
+            let min_y = monitors.iter().map(|m| m.y).min().unwrap_or(0);
             (min_x, min_y)
         } else {
             (0, 0)
@@ -57,21 +56,7 @@ impl Capture for RegionCapture {
         #[cfg(windows)]
         let monitors = super::fast_list_monitors()?;
         #[cfg(not(windows))]
-        let monitors = {
-            let screens = Monitor::all()?;
-            screens
-                .into_iter()
-                .map(|s| super::MonitorInfo {
-                    id: s.id(),
-                    name: s.name().to_string(),
-                    x: s.x(),
-                    y: s.y(),
-                    width: s.width(),
-                    height: s.height(),
-                    is_primary: s.is_primary(),
-                })
-                .collect::<Vec<_>>()
-        };
+        let monitors = super::list_monitors()?;
 
         if monitors.is_empty() {
             return Err(anyhow!("No monitors found"));
@@ -142,21 +127,17 @@ impl Capture for RegionCapture {
                 }
             };
             #[cfg(not(windows))]
-            let img = {
-                let screens = Monitor::all()?;
-                let screen = match screens.into_iter().find(|s| s.id() == monitor.id) {
-                    Some(s) => s,
-                    None => continue,
-                };
-                match screen.capture_image() {
-                    Ok(i) => super::orient_captured_image(
-                        i,
+            let img = match super::capture_one_monitor(monitor) {
+                Ok(i) => i,
+                Err(e) => {
+                    tracing::warn!(
+                        "RegionCapture: capture_one_monitor failed for {}x{}+{}+{}: {e:#}",
                         monitor.width,
                         monitor.height,
                         monitor.x,
                         monitor.y,
-                    ),
-                    Err(_) => continue,
+                    );
+                    continue;
                 }
             };
 

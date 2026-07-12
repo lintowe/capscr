@@ -1484,7 +1484,7 @@ mod windows_impl {
             CreateDIBSection, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS,
         };
 
-        let monitors = xcap::Monitor::all().ok()?;
+        let monitors = crate::capture::list_monitors().ok()?;
         if monitors.is_empty() {
             return None;
         }
@@ -1521,10 +1521,10 @@ mod windows_impl {
 
         let mut any_ok = false;
         for monitor in &monitors {
-            let mx = monitor.x();
-            let my = monitor.y();
-            let mw = monitor.width() as i32;
-            let mh = monitor.height() as i32;
+            let mx = monitor.x;
+            let my = monitor.y;
+            let mw = monitor.width as i32;
+            let mh = monitor.height as i32;
             let center = (mx + mw / 2, my + mh / 2);
             let img = match HdrCapture::new().capture_with_hdr_at(Some(center)) {
                 Ok((img, _)) => img,
