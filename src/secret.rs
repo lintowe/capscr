@@ -31,7 +31,7 @@ pub fn decrypt(blob: &str) -> Result<String> {
     #[cfg(not(windows))]
     {
         let bytes = hex::decode(blob).map_err(|e| anyhow!("bad hex: {e}"))?;
-        Ok(String::from_utf8(bytes).map_err(|e| anyhow!("bad utf-8: {e}"))?)
+        String::from_utf8(bytes).map_err(|e| anyhow!("bad utf-8: {e}"))
     }
 }
 

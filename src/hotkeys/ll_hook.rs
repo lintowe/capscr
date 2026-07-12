@@ -21,10 +21,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WH_KEYBOARD_LL, WH_MOUSE_LL, WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP,
 };
 
-pub const MOD_CTRL: u8 = 1;
-pub const MOD_ALT: u8 = 2;
-pub const MOD_SHIFT: u8 = 4;
-pub const MOD_WIN: u8 = 8;
+pub use super::{MOD_ALT, MOD_CTRL, MOD_SHIFT, MOD_WIN};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct HookBinding {

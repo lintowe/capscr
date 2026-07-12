@@ -7,21 +7,28 @@ use anyhow::{anyhow, Result};
 use global_hotkey::hotkey::{Code, HotKey, Modifiers};
 use std::collections::HashMap;
 
+// modifier bitmask shared by every hotkey backend (LL hook on windows,
+// X11/portal on linux) and by the capture events sent to the hub UI
+pub const MOD_CTRL: u8 = 1;
+pub const MOD_ALT: u8 = 2;
+pub const MOD_SHIFT: u8 = 4;
+pub const MOD_WIN: u8 = 8;
+
 #[cfg(windows)]
 pub fn hotkey_to_hook_binding(hk: &HotKey) -> Option<ll_hook::HookBinding> {
     let vk = code_to_vk(hk.key)?;
     let mut mods = 0u8;
     if hk.mods.contains(Modifiers::CONTROL) {
-        mods |= ll_hook::MOD_CTRL;
+        mods |= MOD_CTRL;
     }
     if hk.mods.contains(Modifiers::ALT) {
-        mods |= ll_hook::MOD_ALT;
+        mods |= MOD_ALT;
     }
     if hk.mods.contains(Modifiers::SHIFT) {
-        mods |= ll_hook::MOD_SHIFT;
+        mods |= MOD_SHIFT;
     }
     if hk.mods.contains(Modifiers::SUPER) {
-        mods |= ll_hook::MOD_WIN;
+        mods |= MOD_WIN;
     }
     Some(ll_hook::HookBinding { vk, mods })
 }
@@ -32,24 +39,17 @@ pub fn hotkey_to_hook_binding(hk: &HotKey) -> Option<ll_hook::HookBinding> {
 /// binding matches what Windows actually delivered at press time.
 pub fn format_vk_mods(vk: u32, mods: u8) -> String {
     let mut parts: Vec<&str> = Vec::new();
-    #[cfg(windows)]
-    {
-        if mods & ll_hook::MOD_CTRL != 0 {
-            parts.push("Ctrl");
-        }
-        if mods & ll_hook::MOD_ALT != 0 {
-            parts.push("Alt");
-        }
-        if mods & ll_hook::MOD_SHIFT != 0 {
-            parts.push("Shift");
-        }
-        if mods & ll_hook::MOD_WIN != 0 {
-            parts.push("Win");
-        }
+    if mods & MOD_CTRL != 0 {
+        parts.push("Ctrl");
     }
-    #[cfg(not(windows))]
-    {
-        let _ = mods;
+    if mods & MOD_ALT != 0 {
+        parts.push("Alt");
+    }
+    if mods & MOD_SHIFT != 0 {
+        parts.push("Shift");
+    }
+    if mods & MOD_WIN != 0 {
+        parts.push("Win");
     }
     let key = vk_to_name(vk).unwrap_or_else(|| format!("VK_0x{:02X}", vk));
     if parts.is_empty() {

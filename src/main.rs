@@ -850,6 +850,12 @@ fn handle_cli_short_circuit<I: IntoIterator<Item = String>>(args: I) -> bool {
             _ => {}
         }
     }
+    // the d2d sweep is a windows-only HDR diagnostic
+    #[cfg(not(windows))]
+    if sweep_dir.is_some() {
+        eprintln!("--d2d-sweep is only available on Windows");
+        return true;
+    }
     #[cfg(windows)]
     if let Some(dir) = sweep_dir {
         attach_parent_console();
