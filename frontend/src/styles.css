@@ -2138,12 +2138,6 @@ kbd {
   height: 100%;
 }
 
-.selector-shade {
-  position: absolute;
-  background: transparent;
-  pointer-events: none;
-}
-
 .selector-outline {
   position: absolute;
   display: none;
@@ -2161,27 +2155,6 @@ kbd {
   background: #000;
   font: 12px/1 ui-monospace, monospace;
   pointer-events: none;
-}
-
-.selector-crosshair {
-  position: absolute;
-  background: #808080;
-  pointer-events: none;
-  will-change: transform;
-}
-
-.selector-crosshair-v {
-  top: 0;
-  bottom: 0;
-  left: 0;
-  width: 1px;
-}
-
-.selector-crosshair-h {
-  top: 0;
-  right: 0;
-  left: 0;
-  height: 1px;
 }
 
 .selector-loupe {

@@ -24,14 +24,8 @@ const ASPECT_TARGETS = [1, 16 / 9, 16 / 10, 4 / 3, 21 / 9];
 export function Selector() {
   let backdrop!: HTMLCanvasElement;
   let root!: HTMLDivElement;
-  let shadeTop!: HTMLDivElement;
-  let shadeRight!: HTMLDivElement;
-  let shadeBottom!: HTMLDivElement;
-  let shadeLeft!: HTMLDivElement;
   let outline!: HTMLDivElement;
   let sizeLabel!: HTMLDivElement;
-  let crosshairTop!: HTMLDivElement;
-  let crosshairLeft!: HTMLDivElement;
   let loupe!: HTMLCanvasElement;
   let colorLabel!: HTMLDivElement;
 
@@ -184,18 +178,11 @@ export function Selector() {
     if (cursorX >= 0 && cursorY >= 0) {
       const screenX = cursorX / sx;
       const screenY = cursorY / sy;
-      [crosshairTop, crosshairLeft].forEach(
-        (element) => (element.style.display = "block"),
-      );
-      crosshairTop.style.transform = `translate3d(${screenX}px, 0, 0)`;
-      crosshairLeft.style.transform = `translate3d(0, ${screenY}px, 0)`;
       loupe.style.display = altHeld ? "block" : "none";
       colorLabel.style.display = altHeld ? "block" : "none";
       if (altHeld) drawLoupe(screenX, screenY);
     } else {
-      [crosshairTop, crosshairLeft, loupe, colorLabel].forEach(
-        (element) => (element.style.display = "none"),
-      );
+      [loupe, colorLabel].forEach((element) => (element.style.display = "none"));
     }
 
     let rect: { left: number; top: number; width: number; height: number } | null = null;
@@ -219,8 +206,7 @@ export function Selector() {
     }
 
     if (!rect) {
-      position(shadeTop, 0, 0, window.innerWidth, window.innerHeight);
-      [shadeRight, shadeBottom, shadeLeft, outline, sizeLabel].forEach((element) => {
+      [outline, sizeLabel].forEach((element) => {
         element.style.display = "none";
       });
       return;
@@ -230,13 +216,7 @@ export function Selector() {
     const top = Math.max(0, rect.top);
     const right = Math.min(window.innerWidth, rect.left + rect.width);
     const bottom = Math.min(window.innerHeight, rect.top + rect.height);
-    [shadeRight, shadeBottom, shadeLeft, outline].forEach((element) => {
-      element.style.display = "block";
-    });
-    position(shadeTop, 0, 0, window.innerWidth, top);
-    position(shadeRight, right, top, window.innerWidth - right, bottom - top);
-    position(shadeBottom, 0, bottom, window.innerWidth, window.innerHeight - bottom);
-    position(shadeLeft, 0, top, left, bottom - top);
+    outline.style.display = "block";
     position(outline, left, top, right - left, bottom - top);
 
     if (label) {
@@ -275,7 +255,9 @@ export function Selector() {
       endX = point.x;
       endY = point.y;
     } else if (!hasSelection()) {
-      hovered = windowAt(point.x, point.y);
+      const nextHovered = windowAt(point.x, point.y);
+      if (nextHovered === hovered && !altHeld) return;
+      hovered = nextHovered;
     }
     schedule();
   };
@@ -420,14 +402,8 @@ export function Selector() {
       onContextMenu={onContextMenu}
     >
       <canvas ref={backdrop} class="selector-backdrop" />
-      <div ref={shadeTop} class="selector-shade" />
-      <div ref={shadeRight} class="selector-shade" />
-      <div ref={shadeBottom} class="selector-shade" />
-      <div ref={shadeLeft} class="selector-shade" />
       <div ref={outline} class="selector-outline" />
       <div ref={sizeLabel} class="selector-label" />
-      <div ref={crosshairTop} class="selector-crosshair selector-crosshair-v" />
-      <div ref={crosshairLeft} class="selector-crosshair selector-crosshair-h" />
       <canvas ref={loupe} class="selector-loupe" />
       <div ref={colorLabel} class="selector-color" />
     </div>
