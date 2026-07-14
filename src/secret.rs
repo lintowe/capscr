@@ -323,7 +323,18 @@ mod tests {
     #[test]
     fn roundtrip() {
         let plain = "hunter2 — with spaces and unicode ✓";
-        let blob = encrypt(plain).expect("encrypt");
+        let blob = match encrypt(plain) {
+            Ok(blob) => blob,
+            #[cfg(target_os = "linux")]
+            Err(error)
+                if error
+                    .to_string()
+                    .contains("org.freedesktop.DBus.Error.ServiceUnknown") =>
+            {
+                return
+            }
+            Err(error) => panic!("encrypt: {error:#}"),
+        };
         assert_ne!(blob, plain, "blob must not equal plaintext");
         let back = decrypt(&blob).expect("decrypt");
         assert_eq!(back, plain);
