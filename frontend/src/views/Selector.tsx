@@ -1,12 +1,6 @@
 import { onCleanup, onMount } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 
-// linux selection overlay. mirrors the win32 GDI selector's interaction
-// model: drag = region, click = window under cursor, alt+click = color pick,
-// shift = aspect snap, ctrl on release = keep open for arrow fine-tune,
-// enter/space = commit (fullscreen when nothing is selected), esc or
-// right-click = cancel, wheel = loupe zoom.
-
 interface WindowRect {
   id: number;
   x: number;
@@ -28,12 +22,24 @@ const MAGNIFIER_SIZE = 120;
 const ASPECT_TARGETS = [1, 16 / 9, 16 / 10, 4 / 3, 21 / 9];
 
 export function Selector() {
-  let canvas!: HTMLCanvasElement;
+  let backdrop!: HTMLCanvasElement;
+  let root!: HTMLDivElement;
+  let shadeTop!: HTMLDivElement;
+  let shadeRight!: HTMLDivElement;
+  let shadeBottom!: HTMLDivElement;
+  let shadeLeft!: HTMLDivElement;
+  let outline!: HTMLDivElement;
+  let sizeLabel!: HTMLDivElement;
+  let crosshairTop!: HTMLDivElement;
+  let crosshairRight!: HTMLDivElement;
+  let crosshairBottom!: HTMLDivElement;
+  let crosshairLeft!: HTMLDivElement;
+  let loupe!: HTMLCanvasElement;
+  let colorLabel!: HTMLDivElement;
+
   let ctxInfo: SelectorContext | null = null;
   let frame: ImageBitmap | null = null;
   let frameData: ImageData | null = null;
-
-  // all coordinates below are frame pixels (canvas backing store space)
   let cursorX = -1;
   let cursorY = -1;
   let startX = 0;
@@ -54,40 +60,28 @@ export function Selector() {
     invoke("selector_finish", { outcome }).catch(() => {});
   };
 
-  const scale = () => {
-    if (!ctxInfo) return { sx: 1, sy: 1 };
-    return {
-      sx: ctxInfo.frame_width / window.innerWidth,
-      sy: ctxInfo.frame_height / window.innerHeight,
-    };
-  };
+  const scale = () => ({
+    sx: (ctxInfo?.frame_width ?? window.innerWidth) / window.innerWidth,
+    sy: (ctxInfo?.frame_height ?? window.innerHeight) / window.innerHeight,
+  });
 
   const toFrame = (e: MouseEvent) => {
     const { sx, sy } = scale();
     return { x: Math.round(e.clientX * sx), y: Math.round(e.clientY * sy) };
   };
 
-  // aspect-snap the end point against the start point, matching the win32
-  // selector: keep width, recompute height for the nearest target ratio
   const snappedEnd = () => {
     if (!shiftHeld) return { ex: endX, ey: endY };
     const dx = endX - startX;
     const dy = endY - startY;
-    const w = Math.abs(dx);
-    const h = Math.abs(dy);
-    if (w === 0 || h === 0) return { ex: endX, ey: endY };
-    const ratio = w / h;
-    let best = ASPECT_TARGETS[0];
-    let bestDiff = Infinity;
-    for (const t of ASPECT_TARGETS) {
-      const diff = Math.abs(ratio - t);
-      if (diff < bestDiff) {
-        bestDiff = diff;
-        best = t;
-      }
-    }
-    const newH = Math.round(w / best);
-    return { ex: endX, ey: startY + Math.sign(dy || 1) * newH };
+    const width = Math.abs(dx);
+    const height = Math.abs(dy);
+    if (!width || !height) return { ex: endX, ey: endY };
+    const ratio = width / height;
+    const target = ASPECT_TARGETS.reduce((best, candidate) =>
+      Math.abs(ratio - candidate) < Math.abs(ratio - best) ? candidate : best,
+    );
+    return { ex: endX, ey: startY + Math.sign(dy || 1) * Math.round(width / target) };
   };
 
   const hasSelection = () => {
@@ -100,180 +94,208 @@ export function Selector() {
 
   const selectionRect = () => {
     const { ex, ey } = snappedEnd();
-    const left = Math.min(startX, ex);
-    const top = Math.min(startY, ey);
     return {
-      left,
-      top,
+      left: Math.min(startX, ex),
+      top: Math.min(startY, ey),
       width: Math.abs(ex - startX),
       height: Math.abs(ey - startY),
     };
   };
 
-  const windowAt = (x: number, y: number): WindowRect | null => {
+  const windowAt = (x: number, y: number) => {
     if (!ctxInfo) return null;
     const vx = x + ctxInfo.origin_x;
     const vy = y + ctxInfo.origin_y;
-    // list is z-ordered topmost first
-    for (const w of ctxInfo.windows) {
-      if (vx >= w.x && vx < w.x + w.width && vy >= w.y && vy < w.y + w.height) {
-        return w;
-      }
-    }
-    return null;
+    return (
+      ctxInfo.windows.find(
+        (candidate) =>
+          vx >= candidate.x &&
+          vx < candidate.x + candidate.width &&
+          vy >= candidate.y &&
+          vy < candidate.y + candidate.height,
+      ) ?? null
+    );
   };
 
   const pixelAt = (x: number, y: number): [number, number, number] => {
     if (!frameData || x < 0 || y < 0 || x >= frameData.width || y >= frameData.height) {
       return [0, 0, 0];
     }
-    const i = (y * frameData.width + x) * 4;
-    return [frameData.data[i], frameData.data[i + 1], frameData.data[i + 2]];
+    const offset = (y * frameData.width + x) * 4;
+    return [frameData.data[offset], frameData.data[offset + 1], frameData.data[offset + 2]];
   };
 
-  const draw = () => {
+  const position = (element: HTMLElement, left: number, top: number, width: number, height: number) => {
+    element.style.left = `${left}px`;
+    element.style.top = `${top}px`;
+    element.style.width = `${Math.max(0, width)}px`;
+    element.style.height = `${Math.max(0, height)}px`;
+  };
+
+  const paintBackdrop = () => {
+    if (!frame) return;
+    const dpr = window.devicePixelRatio || 1;
+    backdrop.width = Math.round(window.innerWidth * dpr);
+    backdrop.height = Math.round(window.innerHeight * dpr);
+    const g = backdrop.getContext("2d");
+    if (!g) return;
+    g.drawImage(frame, 0, 0, backdrop.width, backdrop.height);
+  };
+
+  const drawLoupe = (screenX: number, screenY: number) => {
+    if (!frame || !ctxInfo) return;
+    const { sx, sy } = scale();
+    let left = screenX + 30;
+    let top = screenY + 30;
+    if (left + MAGNIFIER_SIZE > window.innerWidth) left = Math.max(0, screenX - MAGNIFIER_SIZE - 30);
+    if (top + MAGNIFIER_SIZE + 19 > window.innerHeight) top = Math.max(0, screenY - MAGNIFIER_SIZE - 49);
+    loupe.style.left = `${left}px`;
+    loupe.style.top = `${top}px`;
+    colorLabel.style.left = `${left}px`;
+    colorLabel.style.top = `${top + MAGNIFIER_SIZE + 2}px`;
+
+    const dpr = window.devicePixelRatio || 1;
+    const size = Math.round(MAGNIFIER_SIZE * dpr);
+    if (loupe.width !== size || loupe.height !== size) {
+      loupe.width = size;
+      loupe.height = size;
+    }
+    const sourceWidth = Math.max(1, Math.floor((MAGNIFIER_SIZE * sx) / zoom));
+    const sourceHeight = Math.max(1, Math.floor((MAGNIFIER_SIZE * sy) / zoom));
+    const sourceX = Math.max(0, Math.min(cursorX - sourceWidth / 2, ctxInfo.frame_width - sourceWidth));
+    const sourceY = Math.max(0, Math.min(cursorY - sourceHeight / 2, ctxInfo.frame_height - sourceHeight));
+    const g = loupe.getContext("2d");
+    if (!g) return;
+    g.imageSmoothingEnabled = false;
+    g.drawImage(frame, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, size, size);
+    g.strokeStyle = "#808080";
+    g.lineWidth = dpr;
+    g.beginPath();
+    g.moveTo(size / 2 - 10 * dpr, size / 2);
+    g.lineTo(size / 2 + 10 * dpr, size / 2);
+    g.moveTo(size / 2, size / 2 - 10 * dpr);
+    g.lineTo(size / 2, size / 2 + 10 * dpr);
+    g.stroke();
+
+    const color = pixelAt(cursorX, cursorY);
+    colorLabel.textContent = `#${color.map((channel) => channel.toString(16).padStart(2, "0")).join("")}`;
+  };
+
+  const render = () => {
     raf = 0;
     if (!ctxInfo) return;
-    const g = canvas.getContext("2d");
-    if (!g) return;
-    const W = canvas.width;
-    const H = canvas.height;
-
-    // dimmed freeze-frame base
-    if (frame) {
-      g.drawImage(frame, 0, 0);
-    } else {
-      g.fillStyle = "#000";
-      g.fillRect(0, 0, W, H);
-    }
-    g.fillStyle = "rgba(0,0,0,0.7)";
-    g.fillRect(0, 0, W, H);
-
-    const punch = (x: number, y: number, w: number, h: number) => {
-      if (!frame || w <= 0 || h <= 0) return;
-      g.drawImage(frame, x, y, w, h, x, y, w, h);
-    };
-
-    const showSelection = mouseDown || hasSelection();
-    if (showSelection) {
-      const r = selectionRect();
-      punch(r.left, r.top, r.width, r.height);
-      g.strokeStyle = "#fff";
-      g.lineWidth = 1;
-      g.strokeRect(r.left + 0.5, r.top + 0.5, r.width, r.height);
-
-      const label = `${r.width}x${r.height}`;
-      g.font = "12px monospace";
-      const tw = g.measureText(label).width;
-      const tx = r.left + 5;
-      const ty = r.top > 20 ? r.top - 6 : r.top + r.height + 15;
-      g.fillStyle = "#000";
-      g.fillRect(tx - 2, ty - 12, tw + 4, 16);
-      g.fillStyle = "#fff";
-      g.fillText(label, tx, ty);
-    } else if (hovered && ctxInfo) {
-      const left = hovered.x - ctxInfo.origin_x;
-      const top = hovered.y - ctxInfo.origin_y;
-      punch(left, top, hovered.width, hovered.height);
-      g.strokeStyle = "#fff";
-      g.lineWidth = 1;
-      g.strokeRect(left + 0.5, top + 0.5, hovered.width, hovered.height);
-    }
-
+    const { sx, sy } = scale();
     if (cursorX >= 0 && cursorY >= 0) {
-      // crosshair with a 20px gap around the cursor
-      g.strokeStyle = "#808080";
-      g.lineWidth = 1;
-      g.beginPath();
-      g.moveTo(0, cursorY + 0.5);
-      g.lineTo(cursorX - 20, cursorY + 0.5);
-      g.moveTo(cursorX + 20, cursorY + 0.5);
-      g.lineTo(W, cursorY + 0.5);
-      g.moveTo(cursorX + 0.5, 0);
-      g.lineTo(cursorX + 0.5, cursorY - 20);
-      g.moveTo(cursorX + 0.5, cursorY + 20);
-      g.lineTo(cursorX + 0.5, H);
-      g.stroke();
+      const screenX = cursorX / sx;
+      const screenY = cursorY / sy;
+      const gap = 20;
+      [crosshairTop, crosshairRight, crosshairBottom, crosshairLeft, loupe, colorLabel].forEach(
+        (element) => (element.style.display = "block"),
+      );
+      position(crosshairTop, screenX, 0, 1, Math.max(0, screenY - gap));
+      position(crosshairRight, screenX + gap, screenY, window.innerWidth - screenX - gap, 1);
+      position(crosshairBottom, screenX, screenY + gap, 1, window.innerHeight - screenY - gap);
+      position(crosshairLeft, 0, screenY, Math.max(0, screenX - gap), 1);
+      drawLoupe(screenX, screenY);
+    } else {
+      [crosshairTop, crosshairRight, crosshairBottom, crosshairLeft, loupe, colorLabel].forEach(
+        (element) => (element.style.display = "none"),
+      );
+    }
 
-      // loupe, flipped away from the canvas edges
-      if (frame) {
-        let magX = cursorX + 30;
-        let magY = cursorY + 30;
-        if (magX + MAGNIFIER_SIZE > W) magX = Math.max(0, cursorX - MAGNIFIER_SIZE - 30);
-        if (magY + MAGNIFIER_SIZE > H) magY = Math.max(0, cursorY - MAGNIFIER_SIZE - 30);
-        const srcSize = Math.max(1, Math.floor(MAGNIFIER_SIZE / zoom));
-        const srcX = Math.max(0, Math.min(cursorX - srcSize / 2, W - srcSize));
-        const srcY = Math.max(0, Math.min(cursorY - srcSize / 2, H - srcSize));
-        g.imageSmoothingEnabled = false;
-        g.drawImage(frame, srcX, srcY, srcSize, srcSize, magX, magY, MAGNIFIER_SIZE, MAGNIFIER_SIZE);
-        g.imageSmoothingEnabled = true;
-        g.strokeStyle = "#fff";
-        g.strokeRect(magX + 0.5, magY + 0.5, MAGNIFIER_SIZE, MAGNIFIER_SIZE);
-        g.strokeStyle = "#808080";
-        const cx = magX + MAGNIFIER_SIZE / 2;
-        const cy = magY + MAGNIFIER_SIZE / 2;
-        g.beginPath();
-        g.moveTo(cx - 10, cy);
-        g.lineTo(cx + 10, cy);
-        g.moveTo(cx, cy - 10);
-        g.lineTo(cx, cy + 10);
-        g.stroke();
+    let rect: { left: number; top: number; width: number; height: number } | null = null;
+    let label = "";
+    if (mouseDown || hasSelection()) {
+      const selected = selectionRect();
+      rect = {
+        left: selected.left / sx,
+        top: selected.top / sy,
+        width: selected.width / sx,
+        height: selected.height / sy,
+      };
+      label = `${selected.width}x${selected.height}`;
+    } else if (hovered) {
+      rect = {
+        left: (hovered.x - ctxInfo.origin_x) / sx,
+        top: (hovered.y - ctxInfo.origin_y) / sy,
+        width: hovered.width / sx,
+        height: hovered.height / sy,
+      };
+    }
 
-        const [pr, pg, pb] = pixelAt(cursorX, cursorY);
-        const hex = `#${[pr, pg, pb].map((v) => v.toString(16).padStart(2, "0")).join("")}`;
-        g.font = "11px monospace";
-        const hw = g.measureText(hex).width;
-        g.fillStyle = "#000";
-        g.fillRect(magX, magY + MAGNIFIER_SIZE + 2, hw + 6, 15);
-        g.fillStyle = "#fff";
-        g.fillText(hex, magX + 3, magY + MAGNIFIER_SIZE + 13);
-      }
+    if (!rect) {
+      position(shadeTop, 0, 0, window.innerWidth, window.innerHeight);
+      [shadeRight, shadeBottom, shadeLeft, outline, sizeLabel].forEach((element) => {
+        element.style.display = "none";
+      });
+      return;
+    }
+
+    const left = Math.max(0, rect.left);
+    const top = Math.max(0, rect.top);
+    const right = Math.min(window.innerWidth, rect.left + rect.width);
+    const bottom = Math.min(window.innerHeight, rect.top + rect.height);
+    [shadeRight, shadeBottom, shadeLeft, outline].forEach((element) => {
+      element.style.display = "block";
+    });
+    position(shadeTop, 0, 0, window.innerWidth, top);
+    position(shadeRight, right, top, window.innerWidth - right, bottom - top);
+    position(shadeBottom, 0, bottom, window.innerWidth, window.innerHeight - bottom);
+    position(shadeLeft, 0, top, left, bottom - top);
+    position(outline, left, top, right - left, bottom - top);
+
+    if (label) {
+      sizeLabel.style.display = "block";
+      sizeLabel.textContent = label;
+      sizeLabel.style.left = `${left + 5}px`;
+      sizeLabel.style.top = `${top > 24 ? top - 21 : bottom + 5}px`;
+    } else {
+      sizeLabel.style.display = "none";
     }
   };
 
   const schedule = () => {
-    if (!raf) raf = requestAnimationFrame(draw);
+    if (!raf) raf = requestAnimationFrame(render);
   };
 
   const commitRegion = () => {
     if (!ctxInfo) return finish({ kind: "cancelled" });
-    const r = selectionRect();
+    const rect = selectionRect();
     finish({
       kind: "region",
-      x: r.left + ctxInfo.origin_x,
-      y: r.top + ctxInfo.origin_y,
-      width: r.width,
-      height: r.height,
+      x: rect.left + ctxInfo.origin_x,
+      y: rect.top + ctxInfo.origin_y,
+      width: rect.width,
+      height: rect.height,
     });
   };
 
   const onMouseMove = (e: MouseEvent) => {
-    const p = toFrame(e);
-    cursorX = p.x;
-    cursorY = p.y;
+    const point = toFrame(e);
+    cursorX = point.x;
+    cursorY = point.y;
     shiftHeld = e.shiftKey;
     if (mouseDown) {
-      endX = p.x;
-      endY = p.y;
+      endX = point.x;
+      endY = point.y;
     } else if (!hasSelection()) {
-      hovered = windowAt(p.x, p.y);
+      hovered = windowAt(point.x, point.y);
     }
     schedule();
   };
 
   const onMouseDown = (e: MouseEvent) => {
-    if (e.button === 2) return; // handled by contextmenu
     if (e.button !== 0) return;
-    const p = toFrame(e);
+    const point = toFrame(e);
     if (e.altKey) {
-      const [r, g, b] = pixelAt(p.x, p.y);
+      const [r, g, b] = pixelAt(point.x, point.y);
       finish({ kind: "color", r, g, b });
       return;
     }
-    startX = p.x;
-    startY = p.y;
-    endX = p.x;
-    endY = p.y;
+    startX = point.x;
+    startY = point.y;
+    endX = point.x;
+    endY = point.y;
     mouseDown = true;
     dragStarted = true;
     schedule();
@@ -281,24 +303,15 @@ export function Selector() {
 
   const onMouseUp = (e: MouseEvent) => {
     if (e.button !== 0 || !mouseDown) return;
-    const p = toFrame(e);
-    endX = p.x;
-    endY = p.y;
+    const point = toFrame(e);
+    endX = point.x;
+    endY = point.y;
     mouseDown = false;
     shiftHeld = e.shiftKey;
-    const dx = Math.abs(endX - startX);
-    const dy = Math.abs(endY - startY);
-    if (dx <= CLICK_THRESHOLD && dy <= CLICK_THRESHOLD) {
-      const w = windowAt(p.x, p.y);
-      if (w) {
-        finish({ kind: "window", id: w.id });
-      } else {
-        finish({ kind: "full_screen" });
-      }
-      return;
-    }
-    // ctrl on release keeps the overlay open for arrow fine-tune
-    if (!e.ctrlKey) {
+    if (Math.abs(endX - startX) <= CLICK_THRESHOLD && Math.abs(endY - startY) <= CLICK_THRESHOLD) {
+      const target = windowAt(point.x, point.y);
+      finish(target ? { kind: "window", id: target.id } : { kind: "full_screen" });
+    } else if (!e.ctrlKey) {
       commitRegion();
     } else {
       schedule();
@@ -307,17 +320,9 @@ export function Selector() {
 
   const onKeyDown = (e: KeyboardEvent) => {
     shiftHeld = e.shiftKey;
-    if (e.key === "Escape") {
-      finish({ kind: "cancelled" });
-      return;
-    }
+    if (e.key === "Escape") return finish({ kind: "cancelled" });
     if (e.key === "Enter" || e.key === " ") {
-      if (hasSelection()) {
-        commitRegion();
-      } else {
-        finish({ kind: "full_screen" });
-      }
-      return;
+      return hasSelection() ? commitRegion() : finish({ kind: "full_screen" });
     }
     const arrows: Record<string, [number, number]> = {
       ArrowLeft: [-1, 0],
@@ -329,36 +334,25 @@ export function Selector() {
     if (!delta) return;
     e.preventDefault();
     const [dx, dy] = delta;
-    if (e.ctrlKey && e.shiftKey) {
-      // adjust the start (top-left) boundary
-      if (dragStarted) {
-        startX += dx;
-        startY += dy;
-      }
-    } else if (e.ctrlKey) {
-      // move the whole selection
-      if (dragStarted) {
-        startX += dx;
-        startY += dy;
-        endX += dx;
-        endY += dy;
-      }
+    if (e.ctrlKey && e.shiftKey && dragStarted) {
+      startX += dx;
+      startY += dy;
+    } else if (e.ctrlKey && dragStarted) {
+      startX += dx;
+      startY += dy;
+      endX += dx;
+      endY += dy;
     } else if (e.shiftKey) {
-      // adjust the end (bottom-right) boundary, seeding at the cursor when
-      // no selection exists yet
       if (!dragStarted) {
         startX = cursorX;
         startY = cursorY;
-        endX = cursorX + dx;
-        endY = cursorY + dy;
+        endX = cursorX;
+        endY = cursorY;
         dragStarted = true;
-      } else {
-        endX += dx;
-        endY += dy;
       }
+      endX += dx;
+      endY += dy;
     } else {
-      // bare arrows nudge the virtual cursor (the webview cannot warp the
-      // real pointer, so the crosshair moves instead)
       cursorX += dx;
       cursorY += dy;
     }
@@ -371,6 +365,7 @@ export function Selector() {
   };
 
   const onWheel = (e: WheelEvent) => {
+    e.preventDefault();
     zoom = e.deltaY < 0 ? Math.min(zoom + 1, 30) : Math.max(zoom - 1, 2);
     schedule();
   };
@@ -380,23 +375,29 @@ export function Selector() {
     finish({ kind: "cancelled" });
   };
 
+  const onResize = () => {
+    paintBackdrop();
+    schedule();
+  };
+
   onMount(async () => {
     document.body.style.cursor = "crosshair";
     try {
       ctxInfo = await invoke<SelectorContext>("selector_context");
-      canvas.width = ctxInfo.frame_width;
-      canvas.height = ctxInfo.frame_height;
       const raw = await invoke<ArrayBuffer>("selector_frame");
-      const bytes = new Uint8ClampedArray(raw);
-      frameData = new ImageData(bytes, ctxInfo.frame_width, ctxInfo.frame_height);
+      frameData = new ImageData(new Uint8ClampedArray(raw), ctxInfo.frame_width, ctxInfo.frame_height);
       frame = await createImageBitmap(frameData);
-    } catch (err) {
-      console.error("selector boot failed", err);
+      paintBackdrop();
+      render();
+      await invoke("selector_ready");
+    } catch (error) {
+      console.error("selector boot failed", error);
       finish({ kind: "cancelled" });
       return;
     }
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("resize", onResize);
     schedule();
   });
 
@@ -404,18 +405,34 @@ export function Selector() {
     document.body.style.cursor = "";
     window.removeEventListener("keydown", onKeyDown);
     window.removeEventListener("keyup", onKeyUp);
+    window.removeEventListener("resize", onResize);
+    frame?.close();
     if (raf) cancelAnimationFrame(raf);
   });
 
   return (
-    <canvas
-      ref={canvas}
-      class="selector-canvas"
+    <div
+      ref={root}
+      class="selector"
       onMouseMove={onMouseMove}
       onMouseDown={onMouseDown}
       onMouseUp={onMouseUp}
       onWheel={onWheel}
       onContextMenu={onContextMenu}
-    />
+    >
+      <canvas ref={backdrop} class="selector-backdrop" />
+      <div ref={shadeTop} class="selector-shade" />
+      <div ref={shadeRight} class="selector-shade" />
+      <div ref={shadeBottom} class="selector-shade" />
+      <div ref={shadeLeft} class="selector-shade" />
+      <div ref={outline} class="selector-outline" />
+      <div ref={sizeLabel} class="selector-label" />
+      <div ref={crosshairTop} class="selector-crosshair" />
+      <div ref={crosshairRight} class="selector-crosshair" />
+      <div ref={crosshairBottom} class="selector-crosshair" />
+      <div ref={crosshairLeft} class="selector-crosshair" />
+      <canvas ref={loupe} class="selector-loupe" />
+      <div ref={colorLabel} class="selector-color" />
+    </div>
   );
 }

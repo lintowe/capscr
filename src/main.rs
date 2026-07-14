@@ -51,6 +51,7 @@ fn set_dpi_awareness() {
 fn set_dpi_awareness() {}
 
 fn main() {
+    std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
     // early exit for --version / --help so capscr.exe behaves like a normal
     // CLI when invoked from PowerShell. Done before tracing / DPI / Tauri
     // setup so the process is genuinely transient in those modes.
@@ -256,6 +257,8 @@ fn main() {
             overlay::linux::selector_context,
             #[cfg(target_os = "linux")]
             overlay::linux::selector_frame,
+            #[cfg(target_os = "linux")]
+            overlay::linux::selector_ready,
             #[cfg(target_os = "linux")]
             overlay::linux::selector_finish,
             #[cfg(target_os = "linux")]
@@ -777,6 +780,8 @@ fn spawn_hotkey_thread(
     #[cfg(target_os = "linux")]
     {
         use std::sync::atomic::Ordering;
+        // wayland-capable mouse-button hotkeys read straight off /dev/input
+        hotkeys::evdev_linux::start(app.clone());
         let app_dispatch = app.clone();
         std::thread::Builder::new()
             .name("capscr-hotkey-dispatch".into())

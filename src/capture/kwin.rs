@@ -33,6 +33,42 @@ pub fn capture_area(x: i32, y: i32, width: u32, height: u32) -> Result<RgbaImage
     if width == 0 || height == 0 {
         return Err(anyhow!("refusing to capture a zero-sized area"));
     }
+    capture_request(|conn, output| {
+        let mut options: HashMap<&str, Value> = HashMap::new();
+        options.insert("include-cursor", Value::from(false));
+        options.insert("native-resolution", Value::from(false));
+        Ok(conn.call_method(
+            Some("org.kde.KWin.ScreenShot2"),
+            "/org/kde/KWin/ScreenShot2",
+            Some("org.kde.KWin.ScreenShot2"),
+            "CaptureArea",
+            &(x, y, width, height, options, output),
+        )?)
+    })
+}
+
+// let kwin perform its own window-under-pointer selection. unlike xcap's xcb
+// window list, this sees native wayland clients as well as xwayland windows.
+pub fn capture_interactive_window(include_cursor: bool) -> Result<RgbaImage> {
+    capture_request(|conn, output| {
+        let mut options: HashMap<&str, Value> = HashMap::new();
+        options.insert("include-cursor", Value::from(include_cursor));
+        options.insert("include-decoration", Value::from(true));
+        options.insert("include-shadow", Value::from(false));
+        options.insert("native-resolution", Value::from(false));
+        Ok(conn.call_method(
+            Some("org.kde.KWin.ScreenShot2"),
+            "/org/kde/KWin/ScreenShot2",
+            Some("org.kde.KWin.ScreenShot2"),
+            "CaptureInteractive",
+            &(0u32, options, output),
+        )?)
+    })
+}
+
+fn capture_request(
+    call: impl FnOnce(&zbus::blocking::Connection, Fd<'_>) -> Result<zbus::Message>,
+) -> Result<RgbaImage> {
     let (mut reader, writer) = std::io::pipe()?;
 
     // kwin blocks on the pipe write once its buffer fills (images are MBs, the
@@ -44,19 +80,7 @@ pub fn capture_area(x: i32, y: i32, width: u32, height: u32) -> Result<RgbaImage
     });
 
     let conn = zbus::blocking::Connection::session()?;
-    let mut options: HashMap<&str, Value> = HashMap::new();
-    options.insert("include-cursor", Value::from(false));
-    // hand back the logical-size image so it lines up with the rest of capscr's
-    // monitor addressing instead of the scaled native resolution
-    options.insert("native-resolution", Value::from(false));
-
-    let reply = conn.call_method(
-        Some("org.kde.KWin.ScreenShot2"),
-        "/org/kde/KWin/ScreenShot2",
-        Some("org.kde.KWin.ScreenShot2"),
-        "CaptureArea",
-        &(x, y, width, height, options, Fd::from(writer.as_fd())),
-    )?;
+    let reply = call(&conn, Fd::from(writer.as_fd()))?;
     // drop our write end so the reader sees EOF once kwin closes its copy
     drop(writer);
 

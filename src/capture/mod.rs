@@ -29,6 +29,10 @@ pub use d2d_tonemap::capture_hdr_to_sdr_sweep;
 pub use gdi::{fast_gdi_capture, fast_list_monitors};
 pub use hdr::HdrCapture;
 pub use hdr_png::{encode_hdr_png, read_cicp, HdrBitmap, HdrTransfer};
+#[cfg(target_os = "linux")]
+pub use kwin::capture_interactive_window as capture_wayland_window;
+#[cfg(target_os = "linux")]
+pub use portal::is_wayland_session;
 pub use region::RegionCapture;
 pub use screen::ScreenCapture;
 pub use tonemapping::TonemapParams;

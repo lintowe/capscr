@@ -119,6 +119,8 @@ russh-sftp = { version = "2", optional = true }
 png = "0.17"
 
 [target.'cfg(target_os = "linux")'.dependencies]
+# direct access to tauri's existing gtk window for the selector surface hint
+gtk = "0.18"
 # X11 cursor snapshot (XFixes) + pointer position. already a transitive dep
 # of arboard, so this adds no new code to the build
 x11rb = { version = "0.13", features = ["xfixes"] }

@@ -119,6 +119,24 @@ fn finish(result: SelectionResult) {
     }
 }
 
+// a wayland session also exposes DISPLAY via xwayland, so DISPLAY being set does
+// not mean x11. the gtk/webview toolkit runs as a wayland client whenever the
+// session is wayland and the backend isn't pinned to x11 — match that, otherwise
+// the overlay takes the x11 absolute-positioning path and lands misplaced,
+// showing both monitors crammed into one window
+fn is_wayland_session() -> bool {
+    if std::env::var("GDK_BACKEND")
+        .map(|b| b.eq_ignore_ascii_case("x11"))
+        .unwrap_or(false)
+    {
+        return false;
+    }
+    std::env::var("WAYLAND_DISPLAY").is_ok()
+        || std::env::var("XDG_SESSION_TYPE")
+            .map(|t| t.eq_ignore_ascii_case("wayland"))
+            .unwrap_or(false)
+}
+
 pub fn select(frozen_frame: Option<Arc<RgbaImage>>) -> SelectionResult {
     let Some(app) = APP.get() else {
         tracing::warn!("selector invoked before app handle registration");
@@ -136,8 +154,7 @@ pub fn select(frozen_frame: Option<Arc<RgbaImage>>) -> SelectionResult {
         monitors.iter().map(|m| m.x).min().unwrap_or(0),
         monitors.iter().map(|m| m.y).min().unwrap_or(0),
     );
-    let pure_wayland =
-        std::env::var("WAYLAND_DISPLAY").is_ok() && std::env::var("DISPLAY").is_err();
+    let pure_wayland = is_wayland_session();
     let surface_rect = if pure_wayland {
         let monitor = monitors
             .iter()
@@ -185,7 +202,7 @@ pub fn select(frozen_frame: Option<Arc<RgbaImage>>) -> SelectionResult {
         let y = (surface_rect.1 - desktop_origin.1).max(0) as u32;
         let width = surface_rect.2.min(frame.width().saturating_sub(x));
         let height = surface_rect.3.min(frame.height().saturating_sub(y));
-        Arc::new(image::imageops::crop_imm(&frame, x, y, width, height).to_image())
+        Arc::new(image::imageops::crop_imm(&*frame, x, y, width, height).to_image())
     });
 
     let (tx, rx): (Sender<SelectionResult>, Receiver<SelectionResult>) = channel();
@@ -239,13 +256,15 @@ fn build_selector_window(app: &AppHandle, (x, y, w, h): (f64, f64, f64, f64)) ->
         .position(x, y)
         .inner_size(w, h)
         .build()?;
+    use gtk::prelude::GtkWindowExt;
+    if let Ok(gtk_window) = window.gtk_window() {
+        gtk_window.set_type_hint(gtk::gdk::WindowTypeHint::Splashscreen);
+    }
     // wayland can't place windows at absolute coordinates; fall back to
     // fullscreen-on-current-monitor so the overlay is still usable there
-    if std::env::var("WAYLAND_DISPLAY").is_ok() && std::env::var("DISPLAY").is_err() {
+    if is_wayland_session() {
         let _ = window.set_fullscreen(true);
     }
-    let _ = window.show();
-    let _ = window.set_focus();
     watch_selector_navigation(app, window);
     Ok(())
 }
@@ -314,6 +333,16 @@ pub fn selector_frame() -> Result<tauri::ipc::Response, String> {
     let active = guard.as_ref().ok_or("no active selection")?;
     let frame = active.frame.as_ref().ok_or("no frozen frame")?;
     Ok(tauri::ipc::Response::new(frame.as_raw().clone()))
+}
+
+#[tauri::command]
+pub fn selector_ready() -> Result<(), String> {
+    let app = APP.get().ok_or("selector app handle is unavailable")?;
+    let window = app
+        .get_webview_window(SELECTOR_LABEL)
+        .ok_or("selector window is unavailable")?;
+    window.show().map_err(|error| error.to_string())?;
+    window.set_focus().map_err(|error| error.to_string())
 }
 
 #[derive(serde::Deserialize)]

@@ -2122,12 +2122,65 @@ kbd {
   background: rgba(255, 255, 255, 0.1);
 }
 
-/* linux selection overlay: the canvas is the whole window */
-.selector-canvas {
-  display: block;
-  width: 100vw;
-  height: 100vh;
+.selector {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
   cursor: crosshair;
+  user-select: none;
+}
+
+.selector-backdrop {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.selector-shade {
+  position: absolute;
+  background: rgba(0, 0, 0, 0.627);
+  pointer-events: none;
+}
+
+.selector-outline {
+  position: absolute;
+  display: none;
+  border: 1px solid #fff;
+  box-sizing: border-box;
+  pointer-events: none;
+}
+
+.selector-label,
+.selector-color {
+  position: absolute;
+  display: none;
+  padding: 2px 4px;
+  color: #fff;
+  background: #000;
+  font: 12px/1 ui-monospace, monospace;
+  pointer-events: none;
+}
+
+.selector-crosshair {
+  position: absolute;
+  background: #808080;
+  pointer-events: none;
+}
+
+.selector-loupe {
+  position: absolute;
+  width: 120px;
+  height: 120px;
+  border: 1px solid #fff;
+  box-sizing: border-box;
+  image-rendering: pixelated;
+  pointer-events: none;
+}
+
+.selector-color {
+  display: block;
+  font-size: 11px;
 }
 
 

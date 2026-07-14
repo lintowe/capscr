@@ -332,10 +332,31 @@ fn run_capture_pipeline_inner(
     } else {
         None
     };
-    let needs_selector = matches!(
-        mode,
-        CaptureModeArg::Region | CaptureModeArg::Window | CaptureModeArg::Fullscreen
-    ) || (matches!(mode, CaptureModeArg::RegionLast) && replay_rect.is_none());
+    #[cfg(target_os = "linux")]
+    let compositor_window =
+        if matches!(mode, CaptureModeArg::Window) && crate::capture::is_wayland_session() {
+            let include_cursor = gate_state.config.lock().unwrap().capture.show_cursor;
+            match crate::capture::capture_wayland_window(include_cursor) {
+                Ok(image) => Some(image),
+                Err(error) if format!("{error:#}").contains("Cancelled") => return Ok(()),
+                Err(error) => {
+                    tracing::debug!(
+                    "compositor window selection unavailable ({error:#}); using capscr selector"
+                );
+                    None
+                }
+            }
+        } else {
+            None
+        };
+    #[cfg(not(target_os = "linux"))]
+    let compositor_window: Option<image::RgbaImage> = None;
+
+    let needs_selector = compositor_window.is_none()
+        && (matches!(
+            mode,
+            CaptureModeArg::Region | CaptureModeArg::Window | CaptureModeArg::Fullscreen
+        ) || (matches!(mode, CaptureModeArg::RegionLast) && replay_rect.is_none()));
 
     // kick window enumeration onto a background thread so it overlaps the
     // freeze-frame capture below instead of running serially on the selector's
@@ -372,13 +393,18 @@ fn run_capture_pipeline_inner(
         None
     };
 
-    let selection = match mode {
-        _ if replay_rect.is_some() => SelectionResult::Region(replay_rect.unwrap()),
-        CaptureModeArg::Region
-        | CaptureModeArg::RegionLast
-        | CaptureModeArg::Window
-        | CaptureModeArg::Fullscreen => UnifiedSelector::select(frozen_frame.clone()),
-        CaptureModeArg::ActiveMonitor => SelectionResult::FullScreen,
+    let mut compositor_window = compositor_window;
+    let selection = if compositor_window.is_some() {
+        SelectionResult::Cancelled
+    } else {
+        match mode {
+            _ if replay_rect.is_some() => SelectionResult::Region(replay_rect.unwrap()),
+            CaptureModeArg::Region
+            | CaptureModeArg::RegionLast
+            | CaptureModeArg::Window
+            | CaptureModeArg::Fullscreen => UnifiedSelector::select(frozen_frame.clone()),
+            CaptureModeArg::ActiveMonitor => SelectionResult::FullScreen,
+        }
     };
 
     tracing::info!("run_capture_pipeline_inner: selection = {selection:?}");
@@ -388,7 +414,10 @@ fn run_capture_pipeline_inner(
         Option<crate::capture::HdrBitmap>,
         Option<(i32, i32)>,
     ) = match selection {
-        SelectionResult::Cancelled => return Ok(()),
+        SelectionResult::Cancelled => match compositor_window.take() {
+            Some(image) => (image, None, None),
+            None => return Ok(()),
+        },
         SelectionResult::Region(rect) => {
             // remember the rectangle so a "region (last)" task can replay it
             *gate_state.last_region.lock().unwrap() = Some(rect);

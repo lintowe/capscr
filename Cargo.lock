@@ -816,6 +816,7 @@ dependencies = [
  "directories",
  "gif",
  "global-hotkey",
+ "gtk",
  "hex",
  "hmac 0.12.1",
  "image",
