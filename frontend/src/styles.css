@@ -2167,6 +2167,21 @@ kbd {
   position: absolute;
   background: #808080;
   pointer-events: none;
+  will-change: transform;
+}
+
+.selector-crosshair-v {
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 1px;
+}
+
+.selector-crosshair-h {
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 1px;
 }
 
 .selector-loupe {

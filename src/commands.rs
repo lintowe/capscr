@@ -379,7 +379,30 @@ fn run_capture_pipeline_inner(
 
     let frozen_frame = if needs_selector {
         let t0 = std::time::Instant::now();
-        match ScreenCapture::all_monitors() {
+        #[cfg(target_os = "linux")]
+        let captured = if crate::capture::is_wayland_session() {
+            crate::capture::list_monitors()
+                .and_then(|monitors| {
+                    monitors
+                        .into_iter()
+                        .find(|monitor| monitor.is_primary)
+                        .ok_or_else(|| anyhow::anyhow!("no primary Wayland output available"))
+                })
+                .and_then(|monitor| {
+                    crate::capture::capture_wayland_area(
+                        monitor.x,
+                        monitor.y,
+                        monitor.width,
+                        monitor.height,
+                    )
+                })
+        } else {
+            ScreenCapture::all_monitors()
+        };
+        #[cfg(not(target_os = "linux"))]
+        let captured = ScreenCapture::all_monitors();
+
+        match captured {
             Ok(img) => {
                 tracing::info!(
                     "Captured full screen freeze-frame in {}ms",

@@ -31,8 +31,6 @@ export function Selector() {
   let outline!: HTMLDivElement;
   let sizeLabel!: HTMLDivElement;
   let crosshairTop!: HTMLDivElement;
-  let crosshairRight!: HTMLDivElement;
-  let crosshairBottom!: HTMLDivElement;
   let crosshairLeft!: HTMLDivElement;
   let loupe!: HTMLCanvasElement;
   let colorLabel!: HTMLDivElement;
@@ -186,19 +184,16 @@ export function Selector() {
     if (cursorX >= 0 && cursorY >= 0) {
       const screenX = cursorX / sx;
       const screenY = cursorY / sy;
-      const gap = 20;
-      [crosshairTop, crosshairRight, crosshairBottom, crosshairLeft].forEach(
+      [crosshairTop, crosshairLeft].forEach(
         (element) => (element.style.display = "block"),
       );
-      position(crosshairTop, screenX, 0, 1, Math.max(0, screenY - gap));
-      position(crosshairRight, screenX + gap, screenY, window.innerWidth - screenX - gap, 1);
-      position(crosshairBottom, screenX, screenY + gap, 1, window.innerHeight - screenY - gap);
-      position(crosshairLeft, 0, screenY, Math.max(0, screenX - gap), 1);
+      crosshairTop.style.transform = `translate3d(${screenX}px, 0, 0)`;
+      crosshairLeft.style.transform = `translate3d(0, ${screenY}px, 0)`;
       loupe.style.display = altHeld ? "block" : "none";
       colorLabel.style.display = altHeld ? "block" : "none";
       if (altHeld) drawLoupe(screenX, screenY);
     } else {
-      [crosshairTop, crosshairRight, crosshairBottom, crosshairLeft, loupe, colorLabel].forEach(
+      [crosshairTop, crosshairLeft, loupe, colorLabel].forEach(
         (element) => (element.style.display = "none"),
       );
     }
@@ -431,10 +426,8 @@ export function Selector() {
       <div ref={shadeLeft} class="selector-shade" />
       <div ref={outline} class="selector-outline" />
       <div ref={sizeLabel} class="selector-label" />
-      <div ref={crosshairTop} class="selector-crosshair" />
-      <div ref={crosshairRight} class="selector-crosshair" />
-      <div ref={crosshairBottom} class="selector-crosshair" />
-      <div ref={crosshairLeft} class="selector-crosshair" />
+      <div ref={crosshairTop} class="selector-crosshair selector-crosshair-v" />
+      <div ref={crosshairLeft} class="selector-crosshair selector-crosshair-h" />
       <canvas ref={loupe} class="selector-loupe" />
       <div ref={colorLabel} class="selector-color" />
     </div>

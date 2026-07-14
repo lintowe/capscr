@@ -190,19 +190,20 @@ pub fn select(frozen_frame: Option<Arc<RgbaImage>>) -> SelectionResult {
     // live desktop through a semi-transparent layered window there; X11 can't
     // rely on a compositor for that, so grab our own freeze-frame backdrop
     let frame = frozen_frame.or_else(|| {
-        crate::capture::ScreenCapture::all_monitors()
+        if pure_wayland {
+            crate::capture::capture_wayland_area(
+                surface_rect.0,
+                surface_rect.1,
+                surface_rect.2,
+                surface_rect.3,
+            )
             .ok()
             .map(Arc::new)
-    });
-    let frame = frame.map(|frame| {
-        if !pure_wayland {
-            return frame;
+        } else {
+            crate::capture::ScreenCapture::all_monitors()
+                .ok()
+                .map(Arc::new)
         }
-        let x = (surface_rect.0 - desktop_origin.0).max(0) as u32;
-        let y = (surface_rect.1 - desktop_origin.1).max(0) as u32;
-        let width = surface_rect.2.min(frame.width().saturating_sub(x));
-        let height = surface_rect.3.min(frame.height().saturating_sub(y));
-        Arc::new(image::imageops::crop_imm(&*frame, x, y, width, height).to_image())
     });
 
     let (tx, rx): (Sender<SelectionResult>, Receiver<SelectionResult>) = channel();
@@ -258,7 +259,7 @@ fn build_selector_window(app: &AppHandle, (x, y, w, h): (f64, f64, f64, f64)) ->
         .build()?;
     use gtk::prelude::{GtkWindowExt, WidgetExt};
     if let Ok(gtk_window) = window.gtk_window() {
-        gtk_window.set_type_hint(gtk::gdk::WindowTypeHint::Splashscreen);
+        gtk_window.set_type_hint(gtk::gdk::WindowTypeHint::Notification);
         if is_wayland_session() {
             if let Some(screen) = WidgetExt::screen(&gtk_window) {
                 let display = gtk_window.display();
