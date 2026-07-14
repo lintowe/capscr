@@ -30,13 +30,27 @@ fn result_u32(results: &HashMap<String, OwnedValue>, key: &str) -> Result<u32> {
 // grab a logical rectangle straight from the compositor. coordinates are in the
 // same logical space capscr uses for monitors, so a monitor's x/y/w/h maps 1:1.
 pub fn capture_area(x: i32, y: i32, width: u32, height: u32) -> Result<RgbaImage> {
+    capture_area_with_resolution(x, y, width, height, false)
+}
+
+pub fn capture_area_native(x: i32, y: i32, width: u32, height: u32) -> Result<RgbaImage> {
+    capture_area_with_resolution(x, y, width, height, true)
+}
+
+fn capture_area_with_resolution(
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+    native_resolution: bool,
+) -> Result<RgbaImage> {
     if width == 0 || height == 0 {
         return Err(anyhow!("refusing to capture a zero-sized area"));
     }
     capture_request(|conn, output| {
         let mut options: HashMap<&str, Value> = HashMap::new();
         options.insert("include-cursor", Value::from(false));
-        options.insert("native-resolution", Value::from(false));
+        options.insert("native-resolution", Value::from(native_resolution));
         Ok(conn.call_method(
             Some("org.kde.KWin.ScreenShot2"),
             "/org/kde/KWin/ScreenShot2",
@@ -55,7 +69,7 @@ pub fn capture_interactive_window(include_cursor: bool) -> Result<RgbaImage> {
         options.insert("include-cursor", Value::from(include_cursor));
         options.insert("include-decoration", Value::from(true));
         options.insert("include-shadow", Value::from(false));
-        options.insert("native-resolution", Value::from(false));
+        options.insert("native-resolution", Value::from(true));
         Ok(conn.call_method(
             Some("org.kde.KWin.ScreenShot2"),
             "/org/kde/KWin/ScreenShot2",

@@ -306,6 +306,18 @@ fn run_capture_pipeline_inner(
     }
     let _gate = CaptureGate(&gate_state.capture_in_progress);
 
+    // keep capscr itself out of the frozen desktop when capture is triggered
+    // from an open hub or a second-instance jump command
+    let hub_was_visible = app
+        .get_webview_window(HUB_LABEL)
+        .and_then(|hub| hub.is_visible().ok().map(|visible| (hub, visible)))
+        .filter(|(_, visible)| *visible);
+    if let Some((hub, _)) = hub_was_visible {
+        let _ = hub.hide();
+        // let the compositor present one frame without the hub before capture
+        std::thread::sleep(Duration::from_millis(34));
+    }
+
     // honour the configured pre-capture delay before capturing the freeze-frame
     // (used to set up menus / hover states before the snapshot is taken).
     {
@@ -421,7 +433,23 @@ fn run_capture_pipeline_inner(
         SelectionResult::Region(rect) => {
             // remember the rectangle so a "region (last)" task can replay it
             *gate_state.last_region.lock().unwrap() = Some(rect);
-            if let Some(frozen) = &frozen_frame {
+            #[cfg(target_os = "linux")]
+            let native_wayland = if crate::capture::is_wayland_session() {
+                Some(crate::capture::capture_wayland_area(
+                    rect.x,
+                    rect.y,
+                    rect.width,
+                    rect.height,
+                )?)
+            } else {
+                None
+            };
+            #[cfg(not(target_os = "linux"))]
+            let native_wayland: Option<image::RgbaImage> = None;
+
+            if let Some(captured) = native_wayland {
+                (captured, None, Some((rect.x, rect.y)))
+            } else if let Some(frozen) = &frozen_frame {
                 #[cfg(windows)]
                 let (min_x, min_y) = {
                     if let Ok(monitors) = crate::capture::fast_list_monitors() {

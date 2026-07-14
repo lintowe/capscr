@@ -2128,6 +2128,7 @@ kbd {
   overflow: hidden;
   cursor: crosshair;
   user-select: none;
+  background: transparent;
 }
 
 .selector-backdrop {
@@ -2139,7 +2140,7 @@ kbd {
 
 .selector-shade {
   position: absolute;
-  background: rgba(0, 0, 0, 0.627);
+  background: transparent;
   pointer-events: none;
 }
 
@@ -2219,4 +2220,3 @@ kbd {
 .recbar-stop:hover {
   background: var(--ink-5);
 }
-

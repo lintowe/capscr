@@ -51,6 +51,7 @@ export function Selector() {
   let hovered: WindowRect | null = null;
   let zoom = 8;
   let shiftHeld = false;
+  let altHeld = false;
   let finished = false;
   let raf = 0;
 
@@ -133,13 +134,10 @@ export function Selector() {
   };
 
   const paintBackdrop = () => {
-    if (!frame) return;
-    const dpr = window.devicePixelRatio || 1;
-    backdrop.width = Math.round(window.innerWidth * dpr);
-    backdrop.height = Math.round(window.innerHeight * dpr);
-    const g = backdrop.getContext("2d");
-    if (!g) return;
-    g.drawImage(frame, 0, 0, backdrop.width, backdrop.height);
+    if (!frame || !ctxInfo) return;
+    backdrop.width = ctxInfo.frame_width;
+    backdrop.height = ctxInfo.frame_height;
+    backdrop.getContext("2d")?.drawImage(frame, 0, 0);
   };
 
   const drawLoupe = (screenX: number, screenY: number) => {
@@ -189,14 +187,16 @@ export function Selector() {
       const screenX = cursorX / sx;
       const screenY = cursorY / sy;
       const gap = 20;
-      [crosshairTop, crosshairRight, crosshairBottom, crosshairLeft, loupe, colorLabel].forEach(
+      [crosshairTop, crosshairRight, crosshairBottom, crosshairLeft].forEach(
         (element) => (element.style.display = "block"),
       );
       position(crosshairTop, screenX, 0, 1, Math.max(0, screenY - gap));
       position(crosshairRight, screenX + gap, screenY, window.innerWidth - screenX - gap, 1);
       position(crosshairBottom, screenX, screenY + gap, 1, window.innerHeight - screenY - gap);
       position(crosshairLeft, 0, screenY, Math.max(0, screenX - gap), 1);
-      drawLoupe(screenX, screenY);
+      loupe.style.display = altHeld ? "block" : "none";
+      colorLabel.style.display = altHeld ? "block" : "none";
+      if (altHeld) drawLoupe(screenX, screenY);
     } else {
       [crosshairTop, crosshairRight, crosshairBottom, crosshairLeft, loupe, colorLabel].forEach(
         (element) => (element.style.display = "none"),
@@ -275,6 +275,7 @@ export function Selector() {
     cursorX = point.x;
     cursorY = point.y;
     shiftHeld = e.shiftKey;
+    altHeld = e.altKey;
     if (mouseDown) {
       endX = point.x;
       endY = point.y;
@@ -308,6 +309,7 @@ export function Selector() {
     endY = point.y;
     mouseDown = false;
     shiftHeld = e.shiftKey;
+    altHeld = e.altKey;
     if (Math.abs(endX - startX) <= CLICK_THRESHOLD && Math.abs(endY - startY) <= CLICK_THRESHOLD) {
       const target = windowAt(point.x, point.y);
       finish(target ? { kind: "window", id: target.id } : { kind: "full_screen" });
@@ -320,6 +322,7 @@ export function Selector() {
 
   const onKeyDown = (e: KeyboardEvent) => {
     shiftHeld = e.shiftKey;
+    altHeld = e.altKey;
     if (e.key === "Escape") return finish({ kind: "cancelled" });
     if (e.key === "Enter" || e.key === " ") {
       return hasSelection() ? commitRegion() : finish({ kind: "full_screen" });
@@ -361,6 +364,7 @@ export function Selector() {
 
   const onKeyUp = (e: KeyboardEvent) => {
     shiftHeld = e.shiftKey;
+    altHeld = e.altKey;
     schedule();
   };
 

@@ -30,6 +30,8 @@ pub use gdi::{fast_gdi_capture, fast_list_monitors};
 pub use hdr::HdrCapture;
 pub use hdr_png::{encode_hdr_png, read_cicp, HdrBitmap, HdrTransfer};
 #[cfg(target_os = "linux")]
+pub use kwin::capture_area_native as capture_wayland_area;
+#[cfg(target_os = "linux")]
 pub use kwin::capture_interactive_window as capture_wayland_window;
 #[cfg(target_os = "linux")]
 pub use portal::is_wayland_session;
@@ -354,6 +356,10 @@ pub fn list_monitors() -> Result<Vec<MonitorInfo>> {
             return Ok(monitors);
         }
     }
+    #[cfg(target_os = "linux")]
+    if portal::is_wayland_session() {
+        return wayland_list_monitors();
+    }
     match xcap::Monitor::all() {
         Ok(screens) => screens.iter().map(monitor_info).collect(),
         // xcap enumerates through XCB even on wayland; without XWayland the
@@ -377,6 +383,21 @@ fn wayland_list_monitors() -> Result<Vec<MonitorInfo>> {
     if outputs.is_empty() {
         return Err(anyhow::anyhow!("compositor reported no outputs"));
     }
+    // wl_output carries the compositor's logical geometry but not KDE's
+    // primary-output flag. XWayland still exposes the correct output names and
+    // primary choice, so borrow only that flag and keep all geometry in the
+    // Wayland coordinate space
+    let primary_name = xcap::Monitor::all().ok().and_then(|monitors| {
+        monitors
+            .iter()
+            .find(|monitor| monitor.is_primary().unwrap_or(false))
+            .and_then(|monitor| monitor.name().ok())
+    });
+    let primary_index = primary_name
+        .as_ref()
+        .and_then(|name| outputs.iter().position(|output| output.name == *name))
+        .unwrap_or(0);
+
     Ok(outputs
         .iter()
         .enumerate()
@@ -387,7 +408,7 @@ fn wayland_list_monitors() -> Result<Vec<MonitorInfo>> {
             y: o.logical_region.inner.position.y,
             width: o.logical_region.inner.size.width,
             height: o.logical_region.inner.size.height,
-            is_primary: i == 0,
+            is_primary: i == primary_index,
         })
         .collect())
 }
