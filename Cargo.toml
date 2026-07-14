@@ -10,6 +10,7 @@ homepage = "https://rot.lt/work/capscr"
 
 [features]
 default = ["sftp", "plugin-runtime"]
+custom-protocol = ["tauri/custom-protocol"]
 # WASM plugin runtime host. When enabled, src/plugin/wasm.rs is compiled
 # and PluginManager::load_all instantiates plugins with `runtime = "wasm"`
 # in their plugin.toml. Shipped on by default since 0.4.0.
