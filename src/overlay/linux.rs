@@ -305,6 +305,77 @@ fn finish(result: SelectionResult) {
     let _ = tx.send(result);
 }
 
+fn frozen_region(rect: Rectangle) -> Option<Arc<RgbaImage>> {
+    let active = ACTIVE.lock().unwrap();
+    let active = active.as_ref()?;
+    compose_frozen_region(rect, &active.surfaces).map(Arc::new)
+}
+
+fn compose_frozen_region(rect: Rectangle, surfaces: &[SelectorSurface]) -> Option<RgbaImage> {
+    let right = rect.x.saturating_add_unsigned(rect.width);
+    let bottom = rect.y.saturating_add_unsigned(rect.height);
+    let mut pieces = Vec::new();
+
+    for surface in surfaces {
+        let surface_right = surface.rect.0.saturating_add_unsigned(surface.rect.2);
+        let surface_bottom = surface.rect.1.saturating_add_unsigned(surface.rect.3);
+        let x0 = rect.x.max(surface.rect.0);
+        let y0 = rect.y.max(surface.rect.1);
+        let x1 = right.min(surface_right);
+        let y1 = bottom.min(surface_bottom);
+        if x0 >= x1 || y0 >= y1 {
+            continue;
+        }
+        let scale_x = surface.frame.width() as f64 / surface.rect.2 as f64;
+        let scale_y = surface.frame.height() as f64 / surface.rect.3 as f64;
+        pieces.push((surface, (x0, y0, x1, y1), scale_x, scale_y));
+    }
+    if pieces.is_empty() {
+        return None;
+    }
+
+    let target_scale_x = pieces.iter().map(|piece| piece.2).fold(1.0f64, f64::max);
+    let target_scale_y = pieces.iter().map(|piece| piece.3).fold(1.0f64, f64::max);
+    let mut captured = RgbaImage::new(
+        (rect.width as f64 * target_scale_x).round().max(1.0) as u32,
+        (rect.height as f64 * target_scale_y).round().max(1.0) as u32,
+    );
+
+    for (surface, (x0, y0, x1, y1), scale_x, scale_y) in pieces {
+        let source_x = ((x0 - surface.rect.0) as f64 * scale_x).round() as u32;
+        let source_y = ((y0 - surface.rect.1) as f64 * scale_y).round() as u32;
+        let source_right = ((x1 - surface.rect.0) as f64 * scale_x).round() as u32;
+        let source_bottom = ((y1 - surface.rect.1) as f64 * scale_y).round() as u32;
+        let piece = image::imageops::crop_imm(
+            &*surface.frame,
+            source_x,
+            source_y,
+            source_right.saturating_sub(source_x),
+            source_bottom.saturating_sub(source_y),
+        )
+        .to_image();
+        let destination_width = ((x1 - x0) as f64 * target_scale_x).round().max(1.0) as u32;
+        let destination_height = ((y1 - y0) as f64 * target_scale_y).round().max(1.0) as u32;
+        let piece = if piece.width() == destination_width && piece.height() == destination_height {
+            piece
+        } else {
+            image::imageops::resize(
+                &piece,
+                destination_width,
+                destination_height,
+                image::imageops::FilterType::CatmullRom,
+            )
+        };
+        image::imageops::overlay(
+            &mut captured,
+            &piece,
+            ((x0 - rect.x) as f64 * target_scale_x).round() as i64,
+            ((y0 - rect.y) as f64 * target_scale_y).round() as i64,
+        );
+    }
+    Some(captured)
+}
+
 // a wayland session also exposes DISPLAY via xwayland, so DISPLAY being set does
 // not mean x11. the gtk/webview toolkit runs as a wayland client whenever the
 // session is wayland and the backend isn't pinned to x11 — match that, otherwise
@@ -725,11 +796,34 @@ pub fn selector_finish(window: tauri::WebviewWindow, outcome: SelectorOutcome) {
             if width == 0 || height == 0 {
                 SelectionResult::Cancelled
             } else {
-                SelectionResult::Region(Rectangle::new(x, y, width, height))
+                let rect = Rectangle::new(x, y, width, height);
+                match frozen_region(rect) {
+                    Some(image) => SelectionResult::FrozenRegion { rect, image },
+                    None => SelectionResult::Region(rect),
+                }
             }
         }
         SelectorOutcome::Window { id, handle, x, y } => match handle {
-            Some(handle) => SelectionResult::WaylandWindow { handle, x, y },
+            Some(handle) => {
+                let rect = {
+                    let active = ACTIVE.lock().unwrap();
+                    active.as_ref().and_then(|active| {
+                        active
+                            .surfaces
+                            .iter()
+                            .flat_map(|surface| surface.windows.iter())
+                            .find(|window| window.handle.as_deref() == Some(handle.as_str()))
+                            .map(|window| {
+                                Rectangle::new(window.x, window.y, window.width, window.height)
+                            })
+                    })
+                };
+                rect.and_then(|rect| frozen_region(rect).map(|image| (rect, image)))
+                    .map_or(
+                        SelectionResult::WaylandWindow { handle, x, y },
+                        |(rect, image)| SelectionResult::FrozenRegion { rect, image },
+                    )
+            }
             None => SelectionResult::Window(id),
         },
         SelectorOutcome::FullScreen => {
@@ -752,4 +846,40 @@ pub fn selector_finish(window: tauri::WebviewWindow, outcome: SelectorOutcome) {
         SelectorOutcome::Cancelled => SelectionResult::Cancelled,
     };
     finish(result);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use image::Rgba;
+
+    #[test]
+    fn frozen_region_uses_native_pixels_across_differently_scaled_outputs() {
+        let surfaces = [
+            SelectorSurface {
+                label: "left".into(),
+                output_name: Some("left".into()),
+                frame: Arc::new(RgbaImage::from_pixel(2, 2, Rgba([255, 0, 0, 255]))),
+                origin: (0, 0),
+                windows: Vec::new(),
+                rect: (0, 0, 2, 2),
+            },
+            SelectorSurface {
+                label: "right".into(),
+                output_name: Some("right".into()),
+                frame: Arc::new(RgbaImage::from_pixel(4, 4, Rgba([0, 0, 255, 255]))),
+                origin: (2, 0),
+                windows: Vec::new(),
+                rect: (2, 0, 2, 2),
+            },
+        ];
+
+        let image = compose_frozen_region(Rectangle::new(1, 0, 2, 2), &surfaces).unwrap();
+
+        assert_eq!(image.dimensions(), (4, 4));
+        assert_eq!(image.get_pixel(0, 0), &Rgba([255, 0, 0, 255]));
+        assert_eq!(image.get_pixel(1, 3), &Rgba([255, 0, 0, 255]));
+        assert_eq!(image.get_pixel(2, 0), &Rgba([0, 0, 255, 255]));
+        assert_eq!(image.get_pixel(3, 3), &Rgba([0, 0, 255, 255]));
+    }
 }

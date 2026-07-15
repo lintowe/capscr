@@ -425,6 +425,14 @@ fn run_capture_pipeline_inner(
         }
     };
 
+    #[cfg(target_os = "linux")]
+    match &selection {
+        SelectionResult::FrozenRegion { rect, .. } => {
+            tracing::info!("run_capture_pipeline_inner: frozen region = {rect:?}")
+        }
+        selection => tracing::info!("run_capture_pipeline_inner: selection = {selection:?}"),
+    }
+    #[cfg(not(target_os = "linux"))]
     tracing::info!("run_capture_pipeline_inner: selection = {selection:?}");
     #[cfg(target_os = "linux")]
     if needs_selector
@@ -494,6 +502,11 @@ fn run_capture_pipeline_inner(
                     Some((rect.x, rect.y)),
                 )
             }
+        }
+        #[cfg(target_os = "linux")]
+        SelectionResult::FrozenRegion { rect, image } => {
+            *gate_state.last_region.lock().unwrap() = Some(rect);
+            (Arc::unwrap_or_clone(image), None, Some((rect.x, rect.y)))
         }
         SelectionResult::Window(hwnd) => {
             if let Some(frozen) = &frozen_frame {
