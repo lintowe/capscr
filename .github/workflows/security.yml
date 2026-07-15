@@ -10,7 +10,7 @@ on:
 
 jobs:
   audit:
-    if: github.actor == 'lintowe'
+    if: github.actor == 'zeo'
     runs-on: [self-hosted, linux-vm]
     steps:
       - uses: actions/checkout@v4
@@ -29,7 +29,7 @@ jobs:
         run: cargo audit
 
   lint-and-test-linux:
-    if: github.actor == 'lintowe'
+    if: github.actor == 'zeo'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -75,7 +75,7 @@ jobs:
         run: cargo clippy --bin capscr --all-targets -- -D warnings
 
   lint-and-test:
-    if: github.actor == 'lintowe'
+    if: github.actor == 'zeo'
     runs-on: [self-hosted, windows-vm]
     steps:
       - uses: actions/checkout@v4

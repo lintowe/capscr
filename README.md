@@ -3,8 +3,8 @@
 Fast HDR-aware screen capture for Windows and Linux — tray-first, signed updates, no telemetry.
 
 - homepage: [rot.lt/work/capscr](https://rot.lt/work/capscr)
-- plugins: [rot.lt/work/capscr/plugins](https://rot.lt/work/capscr/plugins) — publishing contract in [`docs/marketplace.md`](docs/marketplace.md), registry at [`lintowe/capscr-plugins`](https://github.com/lintowe/capscr-plugins)
-- downloads: [GitHub Releases](https://github.com/lintowe/capscr/releases) (signed MSI / deb / rpm / AppImage + auto-updater)
+- plugins: [rot.lt/work/capscr/plugins](https://rot.lt/work/capscr/plugins) — publishing contract in [`docs/marketplace.md`](docs/marketplace.md), registry at [`zeo/capscr-plugins`](https://github.com/zeo/capscr-plugins)
+- downloads: [GitHub Releases](https://github.com/zeo/capscr/releases) (signed MSI / deb / rpm / AppImage + auto-updater)
 - license: MIT
 
 ## features
@@ -29,7 +29,7 @@ No telemetry.
 
 ## install
 
-Download from the [releases page](https://github.com/lintowe/capscr/releases/latest):
+Download from the [releases page](https://github.com/zeo/capscr/releases/latest):
 
 | file | use |
 |---|---|
@@ -91,7 +91,7 @@ public_url_template = "https://files.example.com/{filename}"
 Requirements: Rust 1.75+, Node 20+, and MSVC build tools (Windows) or the webkit2gtk stack (Linux).
 
 ```powershell
-git clone https://github.com/lintowe/capscr.git
+git clone https://github.com/zeo/capscr.git
 cd capscr
 npm --prefix frontend install
 cargo install tauri-cli --version "^2" --locked
@@ -114,7 +114,7 @@ For signed bundles set `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KE
 
 capscr ships with a built-in marketplace. Open the hub (tray → click capscr), switch to the **plugins** tab, and the in-app browser fetches [`rot.lt/capscr/registry.json`](https://rot.lt/capscr/registry.json). Click `[install]` and capscr downloads the plugin zip, verifies its sha256, and extracts it to `%APPDATA%/com.capscr.capscr/data/plugins/<id>/`.
 
-The marketplace contract — `registry.json` shape, plugin zip layout, publishing — is documented in [`docs/marketplace.md`](docs/marketplace.md). The source-of-truth registry lives at [`lintowe/capscr-plugins`](https://github.com/lintowe/capscr-plugins).
+The marketplace contract — `registry.json` shape, plugin zip layout, publishing — is documented in [`docs/marketplace.md`](docs/marketplace.md). The source-of-truth registry lives at [`zeo/capscr-plugins`](https://github.com/zeo/capscr-plugins).
 
 Status: the plugin runtime (event hooks, WASM host) ships in v0.4. WASM plugins now execute — the host dispatches `on_capture`, `on_capture_saved`, and `on_upload_success` to plugin exports, and grants capability-gated host imports (`log`, `clipboard_write_text`, `notify`, `fetch`). See [`docs/plugin-runtime.md`](docs/plugin-runtime.md). Plugins without a `[runtime]` section stay metadata-only — listed under "installed" but not executed.
 

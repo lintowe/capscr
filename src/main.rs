@@ -960,7 +960,7 @@ fn print_help() {
         \n\
         With no flags, capscr runs in the tray. Click the icon or press a configured hotkey to capture.\n\
         Hub UI: <hotkeys / tasks / settings / history / marketplace> via tray menu or jump list.\n\
-        Repo:   https://github.com/lintowe/capscr",
+        Repo:   https://github.com/zeo/capscr",
         env!("CARGO_PKG_VERSION")
     );
 }
