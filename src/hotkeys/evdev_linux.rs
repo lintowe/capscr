@@ -8,9 +8,8 @@
 use crate::hotkeys::{MOD_ALT, MOD_CTRL, MOD_SHIFT, MOD_WIN};
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{Read, Write};
-use std::os::fd::AsRawFd;
-use std::path::{Path, PathBuf};
+use std::io::Read;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Mutex;
 use std::time::Instant;
@@ -35,150 +34,6 @@ const KEY_RIGHTMETA: u16 = 126;
 
 // one input_event record on 64-bit linux: timeval(16) + type(2) + code(2) + value(4)
 const EVENT_SIZE: usize = 24;
-const EV_SYN: u16 = 0x00;
-const EV_REL: u16 = 0x02;
-const EV_MSC: u16 = 0x04;
-
-const UI_DEV_CREATE: usize = 0x5501;
-const UI_DEV_DESTROY: usize = 0x5502;
-const UI_DEV_SETUP: usize = 0x405c_5503;
-const UI_SET_EVBIT: usize = 0x4004_5564;
-const UI_SET_KEYBIT: usize = 0x4004_5565;
-const UI_SET_RELBIT: usize = 0x4004_5566;
-const UI_SET_MSCBIT: usize = 0x4004_5568;
-const UI_SET_PROPBIT: usize = 0x4004_556e;
-const EVIOCGRAB: usize = 0x4004_4590;
-const INPUT_PROP_POINTER: u16 = 0x00;
-
-unsafe extern "C" {
-    fn ioctl(fd: i32, request: usize, ...) -> i32;
-}
-
-#[repr(C)]
-struct InputId {
-    bustype: u16,
-    vendor: u16,
-    product: u16,
-    version: u16,
-}
-
-#[repr(C)]
-struct UInputSetup {
-    id: InputId,
-    name: [u8; 80],
-    ff_effects_max: u32,
-}
-
-struct MouseMirror {
-    output: File,
-    input_fd: i32,
-}
-
-impl MouseMirror {
-    fn create(path: &Path, input_fd: i32) -> std::io::Result<Option<Self>> {
-        let event_name = path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("");
-        let device_dir = PathBuf::from("/sys/class/input")
-            .join(event_name)
-            .join("device");
-        let is_mouse = std::fs::read_dir(&device_dir)?
-            .flatten()
-            .any(|entry| entry.file_name().to_string_lossy().starts_with("mouse"));
-        if !is_mouse {
-            return Ok(None);
-        }
-
-        let output = std::fs::OpenOptions::new()
-            .write(true)
-            .open("/dev/uinput")?;
-        let fd = output.as_raw_fd();
-        let set = |request, code| unsafe { ioctl(fd, request, code as usize) } == 0;
-        if !set(UI_SET_EVBIT, EV_SYN)
-            || !set(UI_SET_EVBIT, EV_KEY)
-            || !set(UI_SET_EVBIT, EV_REL)
-            || !set(UI_SET_EVBIT, EV_MSC)
-            || !set(UI_SET_PROPBIT, INPUT_PROP_POINTER)
-        {
-            return Err(std::io::Error::last_os_error());
-        }
-        for code in 0x110..=0x117 {
-            if !set(UI_SET_KEYBIT, code) {
-                return Err(std::io::Error::last_os_error());
-            }
-        }
-        for code in 0..=12 {
-            if !set(UI_SET_RELBIT, code) {
-                return Err(std::io::Error::last_os_error());
-            }
-        }
-        for code in 0..=7 {
-            if !set(UI_SET_MSCBIT, code) {
-                return Err(std::io::Error::last_os_error());
-            }
-        }
-
-        let mut setup = UInputSetup {
-            id: InputId {
-                bustype: 0x03,
-                vendor: 0x1d6b,
-                product: 0x0104,
-                version: 1,
-            },
-            name: [0; 80],
-            ff_effects_max: 0,
-        };
-        let name = b"capscr mouse passthrough";
-        setup.name[..name.len()].copy_from_slice(name);
-        if unsafe { ioctl(fd, UI_DEV_SETUP, &setup) } != 0
-            || unsafe { ioctl(fd, UI_DEV_CREATE) } != 0
-        {
-            return Err(std::io::Error::last_os_error());
-        }
-
-        let mirror = Self { output, input_fd };
-        mirror.wait_until_ready()?;
-        if unsafe { ioctl(input_fd, EVIOCGRAB, 1usize) } != 0 {
-            return Err(std::io::Error::last_os_error());
-        }
-        Ok(Some(mirror))
-    }
-
-    fn forward(&mut self, event: &[u8; EVENT_SIZE]) -> std::io::Result<()> {
-        self.output.write_all(event)
-    }
-
-    fn wait_until_ready(&self) -> std::io::Result<()> {
-        for _ in 0..30 {
-            let ready = std::fs::read_dir("/sys/class/input")?
-                .flatten()
-                .any(|entry| {
-                    entry.file_name().to_string_lossy().starts_with("event")
-                        && std::fs::read_to_string(entry.path().join("device/name"))
-                            .is_ok_and(|name| name.trim() == "capscr mouse passthrough")
-                });
-            if ready {
-                std::thread::sleep(std::time::Duration::from_secs(1));
-                return Ok(());
-            }
-            std::thread::sleep(std::time::Duration::from_millis(100));
-        }
-        Err(std::io::Error::new(
-            std::io::ErrorKind::TimedOut,
-            "virtual mouse did not become ready",
-        ))
-    }
-}
-
-impl Drop for MouseMirror {
-    fn drop(&mut self) {
-        unsafe {
-            ioctl(self.input_fd, EVIOCGRAB, 0usize);
-            ioctl(self.output.as_raw_fd(), UI_DEV_DESTROY);
-        }
-    }
-}
 
 static MODS: AtomicU8 = AtomicU8::new(0);
 // (modifier mask, evdev button code) -> capture task id
@@ -302,14 +157,6 @@ pub fn set_bindings(map: HashMap<(u8, u16), String>) {
     *BINDINGS.lock().unwrap() = Some(map);
 }
 
-pub fn has_mouse_binding() -> bool {
-    BINDINGS.lock().unwrap().as_ref().is_some_and(|bindings| {
-        bindings
-            .keys()
-            .any(|(_, code)| matches!(*code, BTN_SIDE | BTN_EXTRA))
-    })
-}
-
 fn mod_bit(code: u16) -> Option<u8> {
     Some(match code {
         KEY_LEFTCTRL | KEY_RIGHTCTRL => MOD_CTRL,
@@ -323,7 +170,7 @@ fn mod_bit(code: u16) -> Option<u8> {
 /// start one reader thread per readable input device. safe to call once at
 /// startup; bindings are read live from BINDINGS so a later config reload just
 /// updates the map without restarting the threads.
-pub fn start(app: AppHandle, consume_mouse_bindings: bool) {
+pub fn start(app: AppHandle) {
     let devices = readable_devices();
     if devices.is_empty() {
         tracing::warn!(
@@ -341,7 +188,7 @@ pub fn start(app: AppHandle, consume_mouse_bindings: bool) {
         let app = app.clone();
         std::thread::Builder::new()
             .name("capscr-evdev".into())
-            .spawn(move || read_device(path, app, consume_mouse_bindings))
+            .spawn(move || read_device(path, app))
             .ok();
     }
 }
@@ -365,29 +212,13 @@ fn readable_devices() -> Vec<PathBuf> {
     out
 }
 
-fn read_device(path: PathBuf, app: AppHandle, consume_mouse_bindings: bool) {
+fn read_device(path: PathBuf, app: AppHandle) {
     let Ok(mut file) = File::open(&path) else {
         return;
-    };
-    let mut mirror = if consume_mouse_bindings {
-        match MouseMirror::create(&path, file.as_raw_fd()) {
-            Ok(Some(mirror)) => {
-                tracing::info!("evdev: consuming bound buttons from {}", path.display());
-                Some(mirror)
-            }
-            Ok(None) => None,
-            Err(error) => {
-                tracing::warn!("evdev: couldn't mirror {}: {error}", path.display());
-                None
-            }
-        }
-    } else {
-        None
     };
     let mut buf = [0u8; EVENT_SIZE];
     // per-thread dedupe so a fast double-report of one press fires once
     let mut last_fire: HashMap<String, Instant> = HashMap::new();
-    let mut consumed_button = None;
     loop {
         // evdev delivers whole 24-byte records; read_exact stays aligned
         if file.read_exact(&mut buf).is_err() {
@@ -395,11 +226,6 @@ fn read_device(path: PathBuf, app: AppHandle, consume_mouse_bindings: bool) {
         }
         let etype = u16::from_ne_bytes([buf[16], buf[17]]);
         if etype != EV_KEY {
-            if let Some(mirror) = &mut mirror {
-                if mirror.forward(&buf).is_err() {
-                    return;
-                }
-            }
             continue;
         }
         let code = u16::from_ne_bytes([buf[18], buf[19]]);
@@ -414,47 +240,22 @@ fn read_device(path: PathBuf, app: AppHandle, consume_mouse_bindings: bool) {
                 }
                 _ => {} // autorepeat: modifier already held
             }
-            if let Some(mirror) = &mut mirror {
-                if mirror.forward(&buf).is_err() {
-                    return;
-                }
-            }
             continue;
         }
 
-        let normalized = normalize_button(code).unwrap_or(code);
-        let consume = if value == 1 {
-            let consumed = dispatch(&app, normalized, &mut last_fire);
-            if consumed {
-                consumed_button = Some(normalized);
-            }
-            consumed
-        } else if value == 0 {
-            let consumed = Some(normalized) == consumed_button;
-            if consumed {
-                consumed_button = None;
-            }
-            consumed
-        } else {
-            Some(normalized) == consumed_button
-        };
-        if !consume {
-            if let Some(mirror) = &mut mirror {
-                if mirror.forward(&buf).is_err() {
-                    return;
-                }
-            }
+        if value == 1 {
+            dispatch(&app, normalize_button(code).unwrap_or(code), &mut last_fire);
         }
     }
 }
 
-fn dispatch(app: &AppHandle, code: u16, last_fire: &mut HashMap<String, Instant>) -> bool {
+fn dispatch(app: &AppHandle, code: u16, last_fire: &mut HashMap<String, Instant>) {
     if app
         .state::<crate::state::AppState>()
         .hotkeys_disabled
         .load(Ordering::SeqCst)
     {
-        return false;
+        return;
     }
     let mods = MODS.load(Ordering::SeqCst);
     let task_id = {
@@ -462,7 +263,7 @@ fn dispatch(app: &AppHandle, code: u16, last_fire: &mut HashMap<String, Instant>
         guard.as_ref().and_then(|m| m.get(&(mods, code)).cloned())
     };
     let Some(task_id) = task_id else {
-        return false;
+        return;
     };
     let now = Instant::now();
     let recent = last_fire
@@ -470,12 +271,11 @@ fn dispatch(app: &AppHandle, code: u16, last_fire: &mut HashMap<String, Instant>
         .map(|t| now.duration_since(*t).as_millis() <= 250)
         .unwrap_or(false);
     if recent {
-        return true;
+        return;
     }
     last_fire.insert(task_id.clone(), now);
     tracing::debug!("evdev: triggering task '{task_id}'");
     crate::commands::trigger_task(app, &task_id);
-    true
 }
 
 #[cfg(test)]

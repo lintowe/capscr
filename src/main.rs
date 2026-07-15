@@ -836,7 +836,7 @@ fn spawn_hotkey_thread(
         }
         hm.flush_to_hook();
         #[cfg(target_os = "linux")]
-        hotkeys::evdev_linux::start(app.clone(), hotkeys::evdev_linux::has_mouse_binding());
+        hotkeys::evdev_linux::start(app.clone());
         let startup_errors = hm.take_errors();
         for err in &startup_errors {
             tracing::warn!(
