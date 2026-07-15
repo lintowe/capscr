@@ -583,8 +583,18 @@ pub mod linux_impl {
                 .min_inner_size(BAR_W, BAR_H)
                 .max_inner_size(BAR_W, BAR_H)
                 .build();
-            if let Err(e) = built {
-                tracing::warn!("recording bar window failed: {e}");
+            match built {
+                Ok(window) => {
+                    // the builder's size request gets dropped on the
+                    // gtk-wayland path and the window balloons to gtk's
+                    // 200x200 default; pin it at the toolkit level
+                    use gtk::prelude::GtkWindowExt;
+                    if let Ok(gtk_window) = window.gtk_window() {
+                        gtk_window.set_default_size(BAR_W as i32, BAR_H as i32);
+                        gtk_window.resize(BAR_W as i32, BAR_H as i32);
+                    }
+                }
+                Err(e) => tracing::warn!("recording bar window failed: {e}"),
             }
         });
     }
