@@ -37,7 +37,7 @@ impl NativeBackdrop {
             .name("capscr-wayland-backdrop".into())
             .spawn(move || {
                 if let Err(error) = run(frames, shutdown_rx, &ready_tx) {
-                    tracing::debug!("native wayland backdrop unavailable: {error:#}");
+                    tracing::warn!("native wayland backdrop unavailable: {error:#}");
                     let _ = ready_tx.send(Err(error));
                 }
             })?;

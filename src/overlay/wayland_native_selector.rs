@@ -61,7 +61,7 @@ impl NativeSelector {
             .name("capscr-wayland-selector".into())
             .spawn(move || {
                 if let Err(error) = run(outputs, shutdown_rx, outcome_tx, &ready_tx) {
-                    tracing::debug!("native wayland selector unavailable: {error:#}");
+                    tracing::warn!("native wayland selector unavailable: {error:#}");
                     let _ = ready_tx.send(Err(error));
                 }
             })?;
@@ -493,32 +493,38 @@ fn run(
     outcome: Sender<NativeOutcome>,
     ready: &Sender<Result<()>>,
 ) -> Result<()> {
-    let wayshot = libwayshot_xcap::WayshotConnection::new()?;
+    let wayshot = libwayshot_xcap::WayshotConnection::new().context("connect to wayland")?;
     let mut event_queue = wayshot.conn.new_event_queue::<State>();
     let queue = event_queue.handle();
-    let compositor =
-        wayshot
-            .globals
-            .bind::<wl_compositor::WlCompositor, _, _>(&queue, 1..=6, ())?;
+    let compositor = wayshot
+        .globals
+        .bind::<wl_compositor::WlCompositor, _, _>(&queue, 1..=6, ())
+        .context("bind wl_compositor")?;
     let subcompositor = wayshot
         .globals
-        .bind::<wl_subcompositor::WlSubcompositor, _, _>(&queue, 1..=1, ())?;
+        .bind::<wl_subcompositor::WlSubcompositor, _, _>(&queue, 1..=1, ())
+        .context("bind wl_subcompositor")?;
     let shm = wayshot
         .globals
-        .bind::<wl_shm::WlShm, _, _>(&queue, 1..=1, ())?;
+        .bind::<wl_shm::WlShm, _, _>(&queue, 1..=1, ())
+        .context("bind wl_shm")?;
     let layer_shell = wayshot
         .globals
-        .bind::<zwlr_layer_shell_v1::ZwlrLayerShellV1, _, _>(&queue, 1..=5, ())?;
-    let viewporter =
-        wayshot
-            .globals
-            .bind::<wp_viewporter::WpViewporter, _, _>(&queue, 1..=1, ())?;
+        .bind::<zwlr_layer_shell_v1::ZwlrLayerShellV1, _, _>(&queue, 1..=5, ())
+        .context("bind zwlr_layer_shell_v1")?;
+    let viewporter = wayshot
+        .globals
+        .bind::<wp_viewporter::WpViewporter, _, _>(&queue, 1..=1, ())
+        .context("bind wp_viewporter")?;
     let _seat = wayshot
         .globals
-        .bind::<wl_seat::WlSeat, _, _>(&queue, 1..=9, ())?;
-    let (white_pool, white_buffer, white_file) = solid_buffer(&shm, &queue, [255; 4])?;
-    let (clear_pool, clear_buffer, clear_file) = solid_buffer(&shm, &queue, [0; 4])?;
-    let cursor = cursor(&compositor, &shm, &queue)?;
+        .bind::<wl_seat::WlSeat, _, _>(&queue, 1..=9, ())
+        .context("bind wl_seat")?;
+    let (white_pool, white_buffer, white_file) =
+        solid_buffer(&shm, &queue, [255; 4]).context("allocate border buffer")?;
+    let (clear_pool, clear_buffer, clear_file) =
+        solid_buffer(&shm, &queue, [0; 4]).context("allocate clear buffer")?;
+    let cursor = cursor(&compositor, &shm, &queue).context("build cursor surface")?;
     let empty_region = compositor.create_region(&queue, ());
     let mut state = State {
         configured: HashSet::new(),
@@ -552,7 +558,9 @@ fn run(
             global.name,
         );
     }
-    event_queue.roundtrip(&mut state)?;
+    event_queue
+        .roundtrip(&mut state)
+        .context("roundtrip after wl_output binds")?;
 
     for output in outputs {
         let output_index = wayshot
@@ -594,31 +602,39 @@ fn run(
             .globals
             .registry()
             .bind(output_global, 4, &queue, ());
-        state.outputs.push(map_output(
-            &queue,
-            &compositor,
-            &subcompositor,
-            &layer_shell,
-            &viewporter,
-            &wl_output,
-            output,
-            &clear_buffer,
-            &white_buffer,
-            &empty_region,
-        )?);
+        let output_name = output.output_name.clone();
+        state.outputs.push(
+            map_output(
+                &queue,
+                &compositor,
+                &subcompositor,
+                &layer_shell,
+                &viewporter,
+                &wl_output,
+                output,
+                &clear_buffer,
+                &white_buffer,
+                &empty_region,
+            )
+            .with_context(|| format!("map selector surface on {output_name}"))?,
+        );
     }
     for output in &state.outputs {
         output.surface.commit();
     }
     while state.configured.len() != state.outputs.len() {
-        event_queue.blocking_dispatch(&mut state)?;
+        event_queue
+            .blocking_dispatch(&mut state)
+            .context("dispatch while waiting for layer surface configure")?;
     }
     for output in &state.outputs {
         output.surface.attach(Some(&clear_buffer), 0, 0);
         output.surface.damage_buffer(0, 0, 1, 1);
         output.surface.commit();
     }
-    event_queue.roundtrip(&mut state)?;
+    event_queue
+        .roundtrip(&mut state)
+        .context("roundtrip after mapping selector surfaces")?;
     tracing::info!(
         "mapped {} native wayland selector surfaces",
         state.outputs.len()

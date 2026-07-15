@@ -566,7 +566,7 @@ pub fn select(frozen_frame: Option<Arc<RgbaImage>>) -> SelectionResult {
                     }
                 };
             }
-            Err(error) => tracing::debug!("using webview selector: {error:#}"),
+            Err(error) => tracing::warn!("using webview selector: {error:#}"),
         }
     }
 
@@ -594,7 +594,7 @@ pub fn select(frozen_frame: Option<Arc<RgbaImage>>) -> SelectionResult {
         })
         .transpose()
         .unwrap_or_else(|error| {
-            tracing::debug!("using webview selector backdrop: {error:#}");
+            tracing::warn!("using webview selector backdrop: {error:#}");
             None
         });
     let native_backdrop_active = native_backdrop.is_some();
