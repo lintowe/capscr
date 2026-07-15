@@ -35,6 +35,7 @@ struct ActiveSelection {
     ready: HashSet<String>,
     focus_label: String,
     tx: Sender<SelectionResult>,
+    native_backdrop: Option<super::wayland_backdrop::NativeBackdrop>,
 }
 
 struct SelectorSurface {
@@ -271,11 +272,13 @@ pub fn cancel_active_selection() {
 fn finish(result: SelectionResult) {
     let active = ACTIVE.lock().unwrap().take();
     let Some(active) = active else { return };
-    let labels: Vec<_> = active
-        .surfaces
-        .into_iter()
-        .map(|surface| surface.label)
-        .collect();
+    let ActiveSelection {
+        surfaces,
+        tx,
+        native_backdrop,
+        ..
+    } = active;
+    let labels: Vec<_> = surfaces.into_iter().map(|surface| surface.label).collect();
     if let Some(app) = APP.get() {
         for label in &labels {
             if let Some(window) = app.get_webview_window(label) {
@@ -292,7 +295,8 @@ fn finish(result: SelectionResult) {
             }
         });
     }
-    let _ = active.tx.send(result);
+    drop(native_backdrop);
+    let _ = tx.send(result);
 }
 
 // a wayland session also exposes DISPLAY via xwayland, so DISPLAY being set does
@@ -426,12 +430,33 @@ pub fn select(frozen_frame: Option<Arc<RgbaImage>>) -> SelectionResult {
         })
         .unwrap_or_else(|| surfaces[0].label.clone());
 
+    let native_backdrop = pure_wayland
+        .then(|| {
+            let frames = surfaces
+                .iter()
+                .filter_map(|surface| {
+                    Some(super::wayland_backdrop::BackdropFrame {
+                        output_name: surface.output_name.clone()?,
+                        image: surface.frame.clone(),
+                    })
+                })
+                .collect();
+            super::wayland_backdrop::NativeBackdrop::show(frames)
+        })
+        .transpose()
+        .unwrap_or_else(|error| {
+            tracing::debug!("using webview selector backdrop: {error:#}");
+            None
+        });
+    let native_backdrop_active = native_backdrop.is_some();
+
     let (tx, rx): (Sender<SelectionResult>, Receiver<SelectionResult>) = channel();
     *ACTIVE.lock().unwrap() = Some(ActiveSelection {
         surfaces,
         ready: HashSet::new(),
         focus_label,
         tx,
+        native_backdrop,
     });
 
     let app_for_build = app.clone();
@@ -447,7 +472,9 @@ pub fn select(frozen_frame: Option<Arc<RgbaImage>>) -> SelectionResult {
     let built = app.run_on_main_thread(move || {
         for (label, rect) in windows {
             let rect = (rect.0 as f64, rect.1 as f64, rect.2 as f64, rect.3 as f64);
-            if let Err(error) = build_selector_window(&app_for_build, &label, rect) {
+            if let Err(error) =
+                build_selector_window(&app_for_build, &label, rect, native_backdrop_active)
+            {
                 tracing::error!("selector window build failed: {error}");
                 finish(SelectionResult::Cancelled);
                 break;
@@ -473,6 +500,7 @@ fn build_selector_window(
     app: &AppHandle,
     label: &str,
     (x, y, w, h): (f64, f64, f64, f64),
+    transparent: bool,
 ) -> tauri::Result<()> {
     if let Some(stale) = app.get_webview_window(label) {
         let _ = stale.destroy();
@@ -484,6 +512,7 @@ fn build_selector_window(
         .resizable(false)
         .always_on_top(true)
         .skip_taskbar(true)
+        .transparent(transparent)
         .visible(false)
         .position(x, y)
         .inner_size(w, h)
@@ -584,6 +613,7 @@ pub struct SelectorContext {
     pub frame_width: u32,
     pub frame_height: u32,
     pub windows: Vec<WindowRect>,
+    pub native_backdrop: bool,
 }
 
 #[tauri::command]
@@ -601,6 +631,7 @@ pub fn selector_context(window: tauri::WebviewWindow) -> Result<SelectorContext,
         frame_width: surface.frame.width(),
         frame_height: surface.frame.height(),
         windows: surface.windows.clone(),
+        native_backdrop: active.native_backdrop.is_some(),
     })
 }
 

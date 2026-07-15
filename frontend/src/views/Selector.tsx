@@ -16,6 +16,7 @@ interface SelectorContext {
   frame_width: number;
   frame_height: number;
   windows: WindowRect[];
+  native_backdrop: boolean;
 }
 
 const CLICK_THRESHOLD = 5;
@@ -160,7 +161,7 @@ export function Selector() {
   };
 
   const paintBackdrop = () => {
-    if (!frame || !ctxInfo) return;
+    if (!frame || !ctxInfo || ctxInfo.native_backdrop) return;
     backdrop.width = ctxInfo.frame_width;
     backdrop.height = ctxInfo.frame_height;
     backdrop.getContext("2d")?.drawImage(frame, 0, 0);
@@ -434,6 +435,7 @@ export function Selector() {
     };
     try {
       ctxInfo = await invoke<SelectorContext>("selector_context");
+      document.documentElement.classList.toggle("selector-native-backdrop", ctxInfo.native_backdrop);
       const raw = await invoke<ArrayBuffer>("selector_frame");
       frameData = new ImageData(new Uint8ClampedArray(raw), ctxInfo.frame_width, ctxInfo.frame_height);
       frame = await createImageBitmap(frameData);
@@ -453,6 +455,7 @@ export function Selector() {
 
   onCleanup(() => {
     document.body.style.cursor = "";
+    document.documentElement.classList.remove("selector-native-backdrop");
     window.removeEventListener("keydown", onKeyDown);
     window.removeEventListener("keyup", onKeyUp);
     window.removeEventListener("resize", onResize);
