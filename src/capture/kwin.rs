@@ -214,9 +214,105 @@ pub fn list_windows() -> Result<Vec<KwinWindow>> {
             },
         ));
     }
-    windows.sort_by_key(|(layer, _)| *layer);
-    windows.reverse();
+    // krunner's list has no z-order within a layer, so a window covered by
+    // another (a fullscreen game over a browser, say) could win hover
+    // hit-tests. sort topmost-first by the compositor's real stacking order
+    // and fall back to the coarse layer sort when it isn't available.
+    let by_stacking = stacking_order().map(|order| {
+        order
+            .iter()
+            .enumerate()
+            .map(|(index, uuid)| (uuid.clone(), index + 1))
+            .collect::<HashMap<String, usize>>()
+    });
+    match by_stacking {
+        Ok(position)
+            if windows
+                .iter()
+                .any(|(_, window)| position.contains_key(window.handle.as_str())) =>
+        {
+            windows.sort_by_key(|(_, window)| {
+                std::cmp::Reverse(position.get(window.handle.as_str()).copied().unwrap_or(0))
+            });
+        }
+        Ok(_) => {
+            tracing::debug!("stacking order shares no ids with the window list; using layers");
+            windows.sort_by_key(|(layer, _)| std::cmp::Reverse(*layer));
+        }
+        Err(e) => {
+            tracing::debug!("stacking order unavailable ({e:#}); using layers");
+            windows.sort_by_key(|(layer, _)| std::cmp::Reverse(*layer));
+        }
+    }
     Ok(windows.into_iter().map(|(_, window)| window).collect())
+}
+
+// the compositor announces the full window stacking order (bottom to top,
+// `;`-separated internal uuids) once on bind
+fn stacking_order() -> Result<Vec<String>> {
+    use wayland_client::globals::{registry_queue_init, GlobalListContents};
+    use wayland_client::protocol::wl_registry;
+    use wayland_client::{Connection, Dispatch, QueueHandle};
+    use wayland_protocols_plasma::plasma_window_management::client::org_kde_plasma_window_management::{
+        self, OrgKdePlasmaWindowManagement,
+    };
+
+    struct Stacking {
+        uuids: Option<Vec<String>>,
+    }
+
+    impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for Stacking {
+        fn event(
+            _: &mut Self,
+            _: &wl_registry::WlRegistry,
+            _: wl_registry::Event,
+            _: &GlobalListContents,
+            _: &Connection,
+            _: &QueueHandle<Self>,
+        ) {
+        }
+    }
+
+    impl Dispatch<OrgKdePlasmaWindowManagement, ()> for Stacking {
+        fn event(
+            state: &mut Self,
+            _: &OrgKdePlasmaWindowManagement,
+            event: org_kde_plasma_window_management::Event,
+            _: &(),
+            _: &Connection,
+            _: &QueueHandle<Self>,
+        ) {
+            if let org_kde_plasma_window_management::Event::StackingOrderUuidChanged { uuids } =
+                event
+            {
+                state.uuids = Some(
+                    uuids
+                        .split(';')
+                        .filter(|uuid| !uuid.is_empty())
+                        .map(String::from)
+                        .collect(),
+                );
+            }
+        }
+    }
+
+    let connection = Connection::connect_to_env()?;
+    let (globals, mut event_queue) = registry_queue_init::<Stacking>(&connection)?;
+    let _manager = globals.bind::<OrgKdePlasmaWindowManagement, _, _>(
+        &event_queue.handle(),
+        12..=16,
+        (),
+    )?;
+    let mut state = Stacking { uuids: None };
+    for _ in 0..4 {
+        event_queue.roundtrip(&mut state)?;
+        if state.uuids.is_some() {
+            break;
+        }
+    }
+    state
+        .uuids
+        .ok_or_else(|| anyhow!("compositor sent no stacking order"))
 }
 
 // persistent-connection region grabber for recording loops: one session-bus
