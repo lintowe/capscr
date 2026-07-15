@@ -239,14 +239,14 @@ fn normalize_wayland_windows(
                 window.x = surface_rect.0 + window.x - monitor_x;
                 window.y = surface_rect.1 + window.y - monitor_y;
             }
+            // fullscreen windows cover the whole output and still count: the
+            // list is ranked by real stacking order, so they only win the
+            // hover hit-test when they are actually on top (desktop and
+            // panel surfaces never reach this list — kwin marks them
+            // skip-taskbar and list_windows drops those)
             let window_right = window.x.saturating_add_unsigned(window.width);
             let window_bottom = window.y.saturating_add_unsigned(window.height);
-            let covers_output = window.x <= surface_rect.0
-                && window.y <= surface_rect.1
-                && window_right >= right
-                && window_bottom >= bottom;
-            (!covers_output
-                && window.x < right
+            (window.x < right
                 && window_right > surface_rect.0
                 && window.y < bottom
                 && window_bottom > surface_rect.1)
@@ -426,12 +426,19 @@ pub fn select(frozen_frame: Option<Arc<RgbaImage>>) -> SelectionResult {
                 frame.width(),
                 frame.height()
             );
+            let windows = normalize_wayland_windows(all_windows.clone(), rect, &monitor.name);
+            tracing::debug!(
+                "selector {}: {} of {} windows intersect",
+                monitor.name,
+                windows.len(),
+                all_windows.len(),
+            );
             surfaces.push(SelectorSurface {
                 label: format!("{SELECTOR_LABEL_PREFIX}{index}"),
                 output_name: Some(monitor.name.clone()),
                 frame,
                 origin: (monitor.x, monitor.y),
-                windows: normalize_wayland_windows(all_windows.clone(), rect, &monitor.name),
+                windows,
                 rect,
             });
         }
