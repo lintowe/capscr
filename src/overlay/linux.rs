@@ -944,4 +944,64 @@ mod tests {
         assert_eq!(image.get_pixel(2, 0), &Rgba([0, 0, 255, 255]));
         assert_eq!(image.get_pixel(3, 3), &Rgba([0, 0, 255, 255]));
     }
+
+    fn patterned(width: u32, height: u32) -> RgbaImage {
+        RgbaImage::from_fn(width, height, |x, y| {
+            Rgba([(x + y * 16) as u8, (x * 3) as u8, (y * 7) as u8, 255])
+        })
+    }
+
+    // the pixel-exactness contract: a region inside one output must come out
+    // byte-identical to the plain crop of that output's native frame
+    #[test]
+    fn frozen_region_inside_a_fractional_scale_output_is_an_exact_crop() {
+        let surfaces = [SelectorSurface {
+            label: "hdmi".into(),
+            output_name: Some("hdmi".into()),
+            frame: Arc::new(patterned(12, 6)),
+            origin: (10, 20),
+            windows: Vec::new(),
+            rect: (10, 20, 8, 4),
+        }];
+
+        let image = compose_frozen_region(Rectangle::new(12, 21, 4, 2), &surfaces).unwrap();
+
+        let expected =
+            image::imageops::crop_imm(&*surfaces[0].frame, 3, 2, image.width(), image.height())
+                .to_image();
+        assert_eq!(image.as_raw(), expected.as_raw());
+    }
+
+    // this machine's topology in miniature: a portrait scale-1 output beside
+    // a fractional 1.5x output, with a region spanning both
+    #[test]
+    fn frozen_region_spanning_portrait_and_scaled_outputs_lands_each_piece() {
+        let surfaces = [
+            SelectorSurface {
+                label: "portrait".into(),
+                output_name: Some("portrait".into()),
+                frame: Arc::new(RgbaImage::from_pixel(4, 8, Rgba([255, 0, 0, 255]))),
+                origin: (0, 0),
+                windows: Vec::new(),
+                rect: (0, 0, 4, 8),
+            },
+            SelectorSurface {
+                label: "hdmi".into(),
+                output_name: Some("hdmi".into()),
+                frame: Arc::new(RgbaImage::from_pixel(12, 6, Rgba([0, 0, 255, 255]))),
+                origin: (4, 2),
+                windows: Vec::new(),
+                rect: (4, 2, 8, 4),
+            },
+        ];
+
+        let image = compose_frozen_region(Rectangle::new(2, 2, 6, 4), &surfaces).unwrap();
+
+        // densest output wins: 6x4 logical at 1.5 = 9x6 pixels
+        assert_eq!(image.dimensions(), (9, 6));
+        assert_eq!(image.get_pixel(0, 0), &Rgba([255, 0, 0, 255]));
+        assert_eq!(image.get_pixel(2, 5), &Rgba([255, 0, 0, 255]));
+        assert_eq!(image.get_pixel(3, 0), &Rgba([0, 0, 255, 255]));
+        assert_eq!(image.get_pixel(8, 5), &Rgba([0, 0, 255, 255]));
+    }
 }
