@@ -20,6 +20,18 @@ interface SelectorContext {
 const CLICK_THRESHOLD = 5;
 const MAGNIFIER_SIZE = 120;
 const ASPECT_TARGETS = [1, 16 / 9, 16 / 10, 4 / 3, 21 / 9];
+const DRAG_CHANNEL = "capscr-selector-drag";
+
+interface SharedDrag {
+  startX: number;
+  startY: number;
+  endX: number;
+  endY: number;
+  mouseDown: boolean;
+  scaleX: number;
+  scaleY: number;
+  shiftHeld: boolean;
+}
 
 export function Selector() {
   let backdrop!: HTMLCanvasElement;
@@ -46,6 +58,9 @@ export function Selector() {
   let altHeld = false;
   let finished = false;
   let raf = 0;
+  let selectionScaleX = 1;
+  let selectionScaleY = 1;
+  const dragChannel = new BroadcastChannel(DRAG_CHANNEL);
 
   const finish = (outcome: Record<string, unknown>) => {
     if (finished) return;
@@ -61,6 +76,24 @@ export function Selector() {
   const toFrame = (e: MouseEvent) => {
     const { sx, sy } = scale();
     return { x: Math.round(e.clientX * sx), y: Math.round(e.clientY * sy) };
+  };
+
+  const toDesktop = (e: MouseEvent) => ({
+    x: e.clientX + (ctxInfo?.origin_x ?? 0),
+    y: e.clientY + (ctxInfo?.origin_y ?? 0),
+  });
+
+  const shareDrag = () => {
+    dragChannel.postMessage({
+      startX,
+      startY,
+      endX,
+      endY,
+      mouseDown,
+      scaleX: selectionScaleX,
+      scaleY: selectionScaleY,
+      shiftHeld,
+    } satisfies SharedDrag);
   };
 
   const snappedEnd = () => {
@@ -190,12 +223,12 @@ export function Selector() {
     if (mouseDown || hasSelection()) {
       const selected = selectionRect();
       rect = {
-        left: selected.left / sx,
-        top: selected.top / sy,
-        width: selected.width / sx,
-        height: selected.height / sy,
+        left: selected.left - ctxInfo.origin_x,
+        top: selected.top - ctxInfo.origin_y,
+        width: selected.width,
+        height: selected.height,
       };
-      label = `${selected.width}x${selected.height}`;
+      label = `${Math.round(selected.width * selectionScaleX)}x${Math.round(selected.height * selectionScaleY)}`;
     } else if (hovered) {
       rect = {
         left: (hovered.x - ctxInfo.origin_x) / sx,
@@ -236,13 +269,12 @@ export function Selector() {
   const commitRegion = () => {
     if (!ctxInfo) return finish({ kind: "cancelled" });
     const rect = selectionRect();
-    const { sx, sy } = scale();
     finish({
       kind: "region",
-      x: Math.round(rect.left / sx) + ctxInfo.origin_x,
-      y: Math.round(rect.top / sy) + ctxInfo.origin_y,
-      width: Math.max(1, Math.round(rect.width / sx)),
-      height: Math.max(1, Math.round(rect.height / sy)),
+      x: Math.round(rect.left),
+      y: Math.round(rect.top),
+      width: Math.max(1, Math.round(rect.width)),
+      height: Math.max(1, Math.round(rect.height)),
     });
   };
 
@@ -253,8 +285,10 @@ export function Selector() {
     shiftHeld = e.shiftKey;
     altHeld = e.altKey;
     if (mouseDown) {
-      endX = point.x;
-      endY = point.y;
+      const desktop = toDesktop(e);
+      endX = desktop.x;
+      endY = desktop.y;
+      shareDrag();
     } else if (!hasSelection()) {
       const nextHovered = windowAt(point.x, point.y);
       if (nextHovered === hovered && !altHeld) return;
@@ -271,23 +305,30 @@ export function Selector() {
       finish({ kind: "color", r, g, b });
       return;
     }
-    startX = point.x;
-    startY = point.y;
-    endX = point.x;
-    endY = point.y;
+    const desktop = toDesktop(e);
+    const { sx, sy } = scale();
+    selectionScaleX = sx;
+    selectionScaleY = sy;
+    startX = desktop.x;
+    startY = desktop.y;
+    endX = desktop.x;
+    endY = desktop.y;
     mouseDown = true;
     dragStarted = true;
+    shareDrag();
     schedule();
   };
 
   const onMouseUp = (e: MouseEvent) => {
     if (e.button !== 0 || !mouseDown) return;
     const point = toFrame(e);
-    endX = point.x;
-    endY = point.y;
+    const desktop = toDesktop(e);
+    endX = desktop.x;
+    endY = desktop.y;
     mouseDown = false;
     shiftHeld = e.shiftKey;
     altHeld = e.altKey;
+    shareDrag();
     if (Math.abs(endX - startX) <= CLICK_THRESHOLD && Math.abs(endY - startY) <= CLICK_THRESHOLD) {
       const target = windowAt(point.x, point.y);
       finish(target ? { kind: "window", id: target.id } : { kind: "full_screen" });
@@ -325,10 +366,11 @@ export function Selector() {
       endY += dy;
     } else if (e.shiftKey) {
       if (!dragStarted) {
-        startX = cursorX;
-        startY = cursorY;
-        endX = cursorX;
-        endY = cursorY;
+        const { sx, sy } = scale();
+        startX = cursorX / sx + (ctxInfo?.origin_x ?? 0);
+        startY = cursorY / sy + (ctxInfo?.origin_y ?? 0);
+        endX = startX;
+        endY = startY;
         dragStarted = true;
       }
       endX += dx;
@@ -337,6 +379,7 @@ export function Selector() {
       cursorX += dx;
       cursorY += dy;
     }
+    if (dragStarted) shareDrag();
     schedule();
   };
 
@@ -364,6 +407,20 @@ export function Selector() {
 
   onMount(async () => {
     document.body.style.cursor = "crosshair";
+    dragChannel.onmessage = (event: MessageEvent<SharedDrag>) => {
+      const next = event.data;
+      if (![next.startX, next.startY, next.endX, next.endY].every(Number.isFinite)) return;
+      startX = next.startX;
+      startY = next.startY;
+      endX = next.endX;
+      endY = next.endY;
+      mouseDown = next.mouseDown;
+      selectionScaleX = next.scaleX;
+      selectionScaleY = next.scaleY;
+      shiftHeld = next.shiftHeld;
+      dragStarted = true;
+      schedule();
+    };
     try {
       ctxInfo = await invoke<SelectorContext>("selector_context");
       const raw = await invoke<ArrayBuffer>("selector_frame");
@@ -389,6 +446,7 @@ export function Selector() {
     window.removeEventListener("keyup", onKeyUp);
     window.removeEventListener("resize", onResize);
     frame?.close();
+    dragChannel.close();
     if (raf) cancelAnimationFrame(raf);
   });
 
