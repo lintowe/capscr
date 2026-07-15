@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs::{File, OpenOptions};
 use std::io::{Seek, SeekFrom, Write};
 use std::os::fd::{AsFd, AsRawFd};
@@ -110,16 +110,12 @@ struct OutputSurface {
     surface: wl_surface::WlSurface,
     layer_surface: zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
     borders: Vec<Border>,
-    image_width: u32,
-    image_height: u32,
     _viewport: wp_viewport::WpViewport,
-    _pool: wl_shm_pool::WlShmPool,
-    _buffer: wl_buffer::WlBuffer,
-    _file: File,
 }
 
 struct State {
     configured: HashSet<String>,
+    output_globals: HashMap<String, u32>,
     outputs: Vec<OutputSurface>,
     pointer: Option<wl_pointer::WlPointer>,
     keyboard: Option<wl_keyboard::WlKeyboard>,
@@ -150,9 +146,25 @@ delegate_noop!(State: ignore wl_surface::WlSurface);
 delegate_noop!(State: ignore wl_region::WlRegion);
 delegate_noop!(State: ignore wl_subcompositor::WlSubcompositor);
 delegate_noop!(State: ignore wl_subsurface::WlSubsurface);
+delegate_noop!(State: ignore wayland_client::protocol::wl_output::WlOutput);
 delegate_noop!(State: ignore zwlr_layer_shell_v1::ZwlrLayerShellV1);
 delegate_noop!(State: ignore wp_viewporter::WpViewporter);
 delegate_noop!(State: ignore wp_viewport::WpViewport);
+
+impl Dispatch<wayland_client::protocol::wl_output::WlOutput, u32> for State {
+    fn event(
+        state: &mut Self,
+        _output: &wayland_client::protocol::wl_output::WlOutput,
+        event: wayland_client::protocol::wl_output::Event,
+        global_name: &u32,
+        _connection: &wayland_client::Connection,
+        _queue: &QueueHandle<Self>,
+    ) {
+        if let wayland_client::protocol::wl_output::Event::Name { name } = event {
+            state.output_globals.insert(name, *global_name);
+        }
+    }
+}
 
 impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, String> for State {
     fn event(
@@ -504,11 +516,13 @@ fn run(
     let _seat = wayshot
         .globals
         .bind::<wl_seat::WlSeat, _, _>(&queue, 1..=9, ())?;
-    let (white_pool, white_buffer, white_file) = solid_buffer(&shm, &queue)?;
+    let (white_pool, white_buffer, white_file) = solid_buffer(&shm, &queue, [255; 4])?;
+    let (clear_pool, clear_buffer, clear_file) = solid_buffer(&shm, &queue, [0; 4])?;
     let cursor = cursor(&compositor, &shm, &queue)?;
     let empty_region = compositor.create_region(&queue, ());
     let mut state = State {
         configured: HashSet::new(),
+        output_globals: HashMap::new(),
         outputs: Vec::with_capacity(outputs.len()),
         pointer: None,
         keyboard: None,
@@ -524,11 +538,27 @@ fn run(
         done: false,
     };
 
+    for global in wayshot
+        .globals
+        .contents()
+        .clone_list()
+        .into_iter()
+        .filter(|global| global.interface == "wl_output")
+    {
+        let _: WlOutput = wayshot.globals.registry().bind(
+            global.name,
+            global.version.min(4),
+            &queue,
+            global.name,
+        );
+    }
+    event_queue.roundtrip(&mut state)?;
+
     for output in outputs {
-        let wayland_output = wayshot
+        let output_index = wayshot
             .get_all_outputs()
             .iter()
-            .find(|candidate| {
+            .position(|candidate| {
                 let region = candidate.logical_region.inner;
                 region.position.x == output.rect.x
                     && region.position.y == output.rect.y
@@ -539,9 +569,10 @@ fn run(
                 wayshot
                     .get_all_outputs()
                     .iter()
-                    .find(|candidate| candidate.name == output.output_name)
+                    .position(|candidate| candidate.name == output.output_name)
             })
             .ok_or_else(|| anyhow!("wayland output {} disappeared", output.output_name))?;
+        let wayland_output = &wayshot.get_all_outputs()[output_index];
         tracing::debug!(
             "native selector frame {} at {},{} {}x{} mapped to wayland output {} at {},{} {}x{}",
             output.output_name,
@@ -555,16 +586,23 @@ fn run(
             wayland_output.logical_region.inner.size.width,
             wayland_output.logical_region.inner.size.height,
         );
-        let wl_output = wayland_output.wl_output.clone();
+        let output_global = *state
+            .output_globals
+            .get(&output.output_name)
+            .ok_or_else(|| anyhow!("wayland output global {} disappeared", output.output_name))?;
+        let wl_output: WlOutput = wayshot
+            .globals
+            .registry()
+            .bind(output_global, 4, &queue, ());
         state.outputs.push(map_output(
             &queue,
             &compositor,
             &subcompositor,
-            &shm,
             &layer_shell,
             &viewporter,
             &wl_output,
             output,
+            &clear_buffer,
             &white_buffer,
             &empty_region,
         )?);
@@ -576,10 +614,8 @@ fn run(
         event_queue.blocking_dispatch(&mut state)?;
     }
     for output in &state.outputs {
-        output.surface.attach(Some(&output._buffer), 0, 0);
-        output
-            .surface
-            .damage_buffer(0, 0, output.image_width as i32, output.image_height as i32);
+        output.surface.attach(Some(&clear_buffer), 0, 0);
+        output.surface.damage_buffer(0, 0, 1, 1);
         output.surface.commit();
     }
     event_queue.roundtrip(&mut state)?;
@@ -603,6 +639,9 @@ fn run(
     drop(white_buffer);
     drop(white_pool);
     drop(white_file);
+    drop(clear_buffer);
+    drop(clear_pool);
+    drop(clear_file);
     Ok(())
 }
 
@@ -634,53 +673,30 @@ fn map_output(
     queue: &QueueHandle<State>,
     compositor: &wl_compositor::WlCompositor,
     subcompositor: &wl_subcompositor::WlSubcompositor,
-    shm: &wl_shm::WlShm,
     layer_shell: &zwlr_layer_shell_v1::ZwlrLayerShellV1,
     viewporter: &wp_viewporter::WpViewporter,
     wl_output: &WlOutput,
     output: NativeOutput,
+    clear_buffer: &wl_buffer::WlBuffer,
     white_buffer: &wl_buffer::WlBuffer,
     empty_region: &wl_region::WlRegion,
 ) -> Result<OutputSurface> {
-    let width = output.image.width();
-    let height = output.image.height();
-    let size = width
-        .checked_mul(height)
-        .and_then(|pixels| pixels.checked_mul(4))
-        .context("selector frame is too large")?;
-    let (mut file, path) = create_shm_file(&output.output_name, size)?;
-    let mut bgra = vec![0; size as usize];
-    crate::capture::par_convert(output.image.as_raw(), &mut bgra, |pixel| {
-        [pixel[2], pixel[1], pixel[0], 255]
-    });
-    file.write_all(&bgra)?;
-    file.seek(SeekFrom::Start(0))?;
-    let _ = std::fs::remove_file(path);
-    let pool = shm.create_pool(file.as_fd(), size as i32, queue, ());
-    let buffer = pool.create_buffer(
-        0,
-        width as i32,
-        height as i32,
-        (width * 4) as i32,
-        wl_shm::Format::Argb8888,
-        queue,
-        (),
-    );
     let surface = compositor.create_surface(queue, ());
     let viewport = viewporter.get_viewport(&surface, queue, ());
     viewport.set_destination(output.rect.width as i32, output.rect.height as i32);
+    surface.attach(Some(clear_buffer), 0, 0);
     let layer_surface = layer_shell.get_layer_surface(
         &surface,
         Some(wl_output),
         Layer::Overlay,
-        "capscr-native-selector".into(),
+        format!("capscr-native-selector-{}", output.output_name),
         queue,
         output.output_name.clone(),
     );
     layer_surface.set_exclusive_zone(-1);
     layer_surface.set_anchor(Anchor::Top | Anchor::Right | Anchor::Bottom | Anchor::Left);
-    layer_surface.set_keyboard_interactivity(KeyboardInteractivity::Exclusive);
-    layer_surface.set_size(0, 0);
+    layer_surface.set_keyboard_interactivity(KeyboardInteractivity::OnDemand);
+    layer_surface.set_size(output.rect.width, output.rect.height);
 
     let mut borders = Vec::with_capacity(4);
     for _ in 0..4 {
@@ -707,21 +723,17 @@ fn map_output(
         surface,
         layer_surface,
         borders,
-        image_width: width,
-        image_height: height,
         _viewport: viewport,
-        _pool: pool,
-        _buffer: buffer,
-        _file: file,
     })
 }
 
 fn solid_buffer(
     shm: &wl_shm::WlShm,
     queue: &QueueHandle<State>,
+    pixel: [u8; 4],
 ) -> Result<(wl_shm_pool::WlShmPool, wl_buffer::WlBuffer, File)> {
     let (mut file, path) = create_shm_file("border", 4)?;
-    file.write_all(&[255, 255, 255, 255])?;
+    file.write_all(&pixel)?;
     file.seek(SeekFrom::Start(0))?;
     let _ = std::fs::remove_file(path);
     let pool = shm.create_pool(file.as_fd(), 4, queue, ());
