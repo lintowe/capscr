@@ -610,6 +610,13 @@ fn run_capture_pipeline_inner(
                 (img, None, origin)
             }
         }
+        #[cfg(target_os = "linux")]
+        SelectionResult::WaylandWindow { handle, x, y } => {
+            let image = crate::capture::capture_wayland_window_handle(&handle, false)?;
+            (image, None, Some((x, y)))
+        }
+        #[cfg(not(target_os = "linux"))]
+        SelectionResult::WaylandWindow { .. } => return Ok(()),
         SelectionResult::FullScreen => {
             let (img, hdr) = capture_active_monitor_with_hdr()?;
             let origin = active_monitor_origin();

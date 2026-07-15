@@ -12,6 +12,15 @@ use anyhow::{anyhow, Result};
 use image::RgbaImage;
 use zbus::zvariant::{Fd, OwnedValue, Value};
 
+#[derive(Debug, Clone)]
+pub struct KwinWindow {
+    pub handle: String,
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+}
+
 fn result_u32(results: &HashMap<String, OwnedValue>, key: &str) -> Result<u32> {
     let v = results
         .get(key)
@@ -78,6 +87,106 @@ pub fn capture_interactive_window(include_cursor: bool) -> Result<RgbaImage> {
             &(0u32, options, output),
         )?)
     })
+}
+
+pub fn capture_window(handle: &str, include_cursor: bool) -> Result<RgbaImage> {
+    capture_request(|conn, output| {
+        let mut options: HashMap<&str, Value> = HashMap::new();
+        options.insert("include-cursor", Value::from(include_cursor));
+        options.insert("include-decoration", Value::from(true));
+        options.insert("include-shadow", Value::from(false));
+        options.insert("native-resolution", Value::from(true));
+        Ok(conn.call_method(
+            Some("org.kde.KWin.ScreenShot2"),
+            "/org/kde/KWin/ScreenShot2",
+            Some("org.kde.KWin.ScreenShot2"),
+            "CaptureWindow",
+            &(handle, options, output),
+        )?)
+    })
+}
+
+pub fn list_windows() -> Result<Vec<KwinWindow>> {
+    type RunnerMatch = (
+        String,
+        String,
+        String,
+        i32,
+        f64,
+        HashMap<String, OwnedValue>,
+    );
+
+    let conn = zbus::blocking::Connection::session()?;
+    let reply = conn.call_method(
+        Some("org.kde.KWin"),
+        "/WindowsRunner",
+        Some("org.kde.krunner1"),
+        "Match",
+        &("",),
+    )?;
+    let matches: Vec<RunnerMatch> = reply.body().deserialize()?;
+    let own_pid = std::process::id() as i32;
+    let mut seen = std::collections::HashSet::new();
+    let mut windows = Vec::new();
+
+    for (match_id, _, _, _, _, _) in matches {
+        let handle = match_id
+            .split_once('_')
+            .map_or(match_id.as_str(), |(_, id)| id);
+        if !seen.insert(handle.to_owned()) {
+            continue;
+        }
+        let reply = conn.call_method(
+            Some("org.kde.KWin"),
+            "/KWin",
+            Some("org.kde.KWin"),
+            "getWindowInfo",
+            &(handle,),
+        )?;
+        let info: HashMap<String, OwnedValue> = reply.body().deserialize()?;
+        let number = |key: &str| {
+            info.get(key)
+                .and_then(|value| value.downcast_ref::<f64>().ok())
+        };
+        let integer = |key: &str| {
+            info.get(key)
+                .and_then(|value| value.downcast_ref::<i32>().ok())
+        };
+        let flag = |key: &str| {
+            info.get(key)
+                .and_then(|value| value.downcast_ref::<bool>().ok())
+                .unwrap_or(false)
+        };
+        if integer("pid") == Some(own_pid)
+            || flag("minimized")
+            || flag("skipSwitcher")
+            || flag("skipTaskbar")
+            || flag("excludeFromCapture")
+        {
+            continue;
+        }
+        let Some((x, y, width, height)) = number("x")
+            .zip(number("y"))
+            .zip(number("width").zip(number("height")))
+            .map(|((x, y), (width, height))| (x, y, width, height))
+        else {
+            continue;
+        };
+        if width <= 5.0 || height <= 5.0 {
+            continue;
+        }
+        windows.push(KwinWindow {
+            handle: handle.to_owned(),
+            x: x.round() as i32,
+            y: y.round() as i32,
+            width: width.round() as u32,
+            height: height.round() as u32,
+        });
+    }
+    // the runner follows kwin's bottom-to-top window order; hit-testing needs
+    // the last painted window first
+    windows.reverse();
+    Ok(windows)
 }
 
 fn capture_request(

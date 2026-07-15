@@ -34,6 +34,10 @@ pub use kwin::capture_area_native as capture_wayland_area;
 #[cfg(target_os = "linux")]
 pub use kwin::capture_interactive_window as capture_wayland_window;
 #[cfg(target_os = "linux")]
+pub use kwin::{
+    capture_window as capture_wayland_window_handle, list_windows as list_wayland_windows,
+};
+#[cfg(target_os = "linux")]
 pub use portal::is_wayland_session;
 pub use region::RegionCapture;
 pub use screen::ScreenCapture;

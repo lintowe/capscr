@@ -51,6 +51,8 @@ static PREWARMED: Mutex<Option<Vec<WindowRect>>> = Mutex::new(None);
 #[derive(Debug, Clone, Serialize)]
 pub struct WindowRect {
     pub id: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub handle: Option<String>,
     pub x: i32,
     pub y: i32,
     pub width: u32,
@@ -66,6 +68,25 @@ pub(crate) fn app_handle() -> Option<&'static AppHandle> {
 }
 
 fn enumerate_windows() -> Vec<WindowRect> {
+    if is_wayland_session() {
+        match crate::capture::list_wayland_windows() {
+            Ok(windows) => {
+                return windows
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, window)| WindowRect {
+                        id: index as u32,
+                        handle: Some(window.handle),
+                        x: window.x,
+                        y: window.y,
+                        width: window.width,
+                        height: window.height,
+                    })
+                    .collect();
+            }
+            Err(error) => tracing::debug!("KWin window list unavailable: {error:#}"),
+        }
+    }
     let own_pid = std::process::id();
     let Ok(windows) = xcap::Window::all() else {
         return Vec::new();
@@ -78,6 +99,7 @@ fn enumerate_windows() -> Vec<WindowRect> {
             }
             let rect = WindowRect {
                 id: w.id().ok()?,
+                handle: None,
                 x: w.x().ok()?,
                 y: w.y().ok()?,
                 width: w.width().ok()?,
@@ -99,27 +121,23 @@ fn normalize_wayland_windows(
     surface_rect: (i32, i32, u32, u32),
     output_name: &str,
 ) -> Vec<WindowRect> {
-    let Some(monitor) = xcap::Monitor::all().ok().and_then(|monitors| {
+    let monitor_origin = xcap::Monitor::all().ok().and_then(|monitors| {
         monitors
             .into_iter()
             .find(|monitor| monitor.name().ok().as_deref() == Some(output_name))
-    }) else {
-        return windows;
-    };
-    let Ok(monitor_x) = monitor.x() else {
-        return windows;
-    };
-    let Ok(monitor_y) = monitor.y() else {
-        return windows;
-    };
+            .and_then(|monitor| Some((monitor.x().ok()?, monitor.y().ok()?)))
+    });
 
     let right = surface_rect.0.saturating_add_unsigned(surface_rect.2);
     let bottom = surface_rect.1.saturating_add_unsigned(surface_rect.3);
     windows
         .into_iter()
         .filter_map(|mut window| {
-            window.x = surface_rect.0 + window.x - monitor_x;
-            window.y = surface_rect.1 + window.y - monitor_y;
+            if window.handle.is_none() {
+                let (monitor_x, monitor_y) = monitor_origin?;
+                window.x = surface_rect.0 + window.x - monitor_x;
+                window.y = surface_rect.1 + window.y - monitor_y;
+            }
             let window_right = window.x.saturating_add_unsigned(window.width);
             let window_bottom = window.y.saturating_add_unsigned(window.height);
             (window.x < right
@@ -542,6 +560,9 @@ pub enum SelectorOutcome {
     },
     Window {
         id: u32,
+        handle: Option<String>,
+        x: i32,
+        y: i32,
     },
     FullScreen,
     Color {
@@ -567,7 +588,10 @@ pub fn selector_finish(outcome: SelectorOutcome) {
                 SelectionResult::Region(Rectangle::new(x, y, width, height))
             }
         }
-        SelectorOutcome::Window { id } => SelectionResult::Window(id),
+        SelectorOutcome::Window { id, handle, x, y } => match handle {
+            Some(handle) => SelectionResult::WaylandWindow { handle, x, y },
+            None => SelectionResult::Window(id),
+        },
         SelectorOutcome::FullScreen => SelectionResult::FullScreen,
         SelectorOutcome::Color { r, g, b } => SelectionResult::PickedColor(r, g, b),
         SelectorOutcome::Cancelled => SelectionResult::Cancelled,

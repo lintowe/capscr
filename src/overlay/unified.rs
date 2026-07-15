@@ -2,10 +2,11 @@
 
 use crate::capture::Rectangle;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SelectionResult {
     Region(Rectangle),
     Window(u32),
+    WaylandWindow { handle: String, x: i32, y: i32 },
     FullScreen,
     Cancelled,
     PickedColor(u8, u8, u8),

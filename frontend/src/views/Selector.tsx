@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 
 interface WindowRect {
   id: number;
+  handle?: string;
   x: number;
   y: number;
   width: number;
@@ -331,7 +332,17 @@ export function Selector() {
     shareDrag();
     if (Math.abs(endX - startX) <= CLICK_THRESHOLD && Math.abs(endY - startY) <= CLICK_THRESHOLD) {
       const target = windowAt(point.x, point.y);
-      finish(target ? { kind: "window", id: target.id } : { kind: "full_screen" });
+      finish(
+        target
+          ? {
+              kind: "window",
+              id: target.id,
+              handle: target.handle ?? null,
+              x: target.x,
+              y: target.y,
+            }
+          : { kind: "full_screen" },
+      );
     } else if (!e.ctrlKey) {
       commitRegion();
     } else {
