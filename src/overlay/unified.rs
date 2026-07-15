@@ -7,6 +7,7 @@ pub enum SelectionResult {
     Region(Rectangle),
     Window(u32),
     WaylandWindow { handle: String, x: i32, y: i32 },
+    Monitor(Rectangle),
     FullScreen,
     Cancelled,
     PickedColor(u8, u8, u8),

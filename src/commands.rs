@@ -617,6 +617,17 @@ fn run_capture_pipeline_inner(
         }
         #[cfg(not(target_os = "linux"))]
         SelectionResult::WaylandWindow { .. } => return Ok(()),
+        SelectionResult::Monitor(rect) => {
+            #[cfg(target_os = "linux")]
+            let image = if crate::capture::is_wayland_session() {
+                crate::capture::capture_wayland_area(rect.x, rect.y, rect.width, rect.height)?
+            } else {
+                RegionCapture::new(rect).capture()?
+            };
+            #[cfg(not(target_os = "linux"))]
+            let image = RegionCapture::new(rect).capture()?;
+            (image, None, Some((rect.x, rect.y)))
+        }
         SelectionResult::FullScreen => {
             let (img, hdr) = capture_active_monitor_with_hdr()?;
             let origin = active_monitor_origin();

@@ -574,7 +574,7 @@ pub enum SelectorOutcome {
 }
 
 #[tauri::command]
-pub fn selector_finish(outcome: SelectorOutcome) {
+pub fn selector_finish(window: tauri::WebviewWindow, outcome: SelectorOutcome) {
     let result = match outcome {
         SelectorOutcome::Region {
             x,
@@ -592,7 +592,21 @@ pub fn selector_finish(outcome: SelectorOutcome) {
             Some(handle) => SelectionResult::WaylandWindow { handle, x, y },
             None => SelectionResult::Window(id),
         },
-        SelectorOutcome::FullScreen => SelectionResult::FullScreen,
+        SelectorOutcome::FullScreen => {
+            let rect = ACTIVE.lock().unwrap().as_ref().and_then(|active| {
+                active
+                    .surfaces
+                    .iter()
+                    .find(|surface| surface.label == window.label())
+                    .map(|surface| surface.rect)
+            });
+            match rect {
+                Some((x, y, width, height)) => {
+                    SelectionResult::Monitor(Rectangle::new(x, y, width, height))
+                }
+                None => SelectionResult::Cancelled,
+            }
+        }
         SelectorOutcome::Color { r, g, b } => SelectionResult::PickedColor(r, g, b),
         SelectorOutcome::Cancelled => SelectionResult::Cancelled,
     };
