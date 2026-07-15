@@ -29,8 +29,27 @@ pub use d2d_tonemap::capture_hdr_to_sdr_sweep;
 pub use gdi::{fast_gdi_capture, fast_list_monitors};
 pub use hdr::HdrCapture;
 pub use hdr_png::{encode_hdr_png, read_cicp, HdrBitmap, HdrTransfer};
+// still captures run one at a time behind the capture gate, so a process-wide
+// cursor hint is safe. it exists because capture_one_monitor's signature is
+// shared with windows, where the cursor is composited after the fact instead —
+// wayland compositors are the only party that can bake the pointer in.
 #[cfg(target_os = "linux")]
-pub use kwin::capture_area_native as capture_wayland_area;
+static INCLUDE_CURSOR: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+#[cfg(target_os = "linux")]
+pub fn set_include_cursor(include: bool) {
+    INCLUDE_CURSOR.store(include, std::sync::atomic::Ordering::Relaxed);
+}
+
+#[cfg(target_os = "linux")]
+fn include_cursor() -> bool {
+    INCLUDE_CURSOR.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+#[cfg(target_os = "linux")]
+pub fn capture_wayland_area(x: i32, y: i32, width: u32, height: u32) -> Result<RgbaImage> {
+    kwin::capture_area_native(x, y, width, height, include_cursor())
+}
 #[cfg(target_os = "linux")]
 pub use kwin::capture_interactive_window as capture_wayland_window;
 
@@ -537,7 +556,13 @@ pub fn active_wayland_monitor() -> Result<MonitorInfo> {
 // each in-process grab is checked for the all-black frame nvidia hands back.
 #[cfg(target_os = "linux")]
 fn wayland_grab_monitor(monitor: &MonitorInfo) -> Result<RgbaImage> {
-    match kwin::capture_area(monitor.x, monitor.y, monitor.width, monitor.height) {
+    match kwin::capture_area(
+        monitor.x,
+        monitor.y,
+        monitor.width,
+        monitor.height,
+        include_cursor(),
+    ) {
         Ok(img) if !is_black_frame(&img) => return Ok(img),
         Ok(_) => tracing::warn!("kwin ScreenShot2 returned all-black; trying screencopy"),
         Err(e) => tracing::debug!("kwin ScreenShot2 unavailable ({e:#}); trying screencopy"),
@@ -572,7 +597,7 @@ fn wlroots_grab(monitor: &MonitorInfo) -> Result<RgbaImage> {
         },
     };
     // libwayshot is on image 0.24; rewrap the raw bytes into our image 0.25
-    let img = conn.screenshot(region, false)?;
+    let img = conn.screenshot(region, include_cursor())?;
     let rgba = img.to_rgba8();
     RgbaImage::from_raw(rgba.width(), rgba.height(), rgba.into_vec())
         .ok_or_else(|| anyhow::anyhow!("screencopy buffer size mismatch"))
@@ -583,7 +608,7 @@ fn wlroots_grab(monitor: &MonitorInfo) -> Result<RgbaImage> {
 // full pixel density so the overlay maps 1:1 onto physical pixels.
 #[cfg(target_os = "linux")]
 pub fn wayland_freeze_output(name: &str) -> Result<RgbaImage> {
-    match kwin::capture_screen(name) {
+    match kwin::capture_screen(name, include_cursor()) {
         Ok(img) if !is_black_frame(&img) => return Ok(img),
         Ok(_) => tracing::warn!("kwin ScreenShot2 froze all-black; trying screencopy"),
         Err(e) => tracing::debug!("kwin ScreenShot2 unavailable ({e:#}); trying screencopy"),
@@ -611,7 +636,7 @@ fn wlroots_freeze_output(name: &str) -> Result<RgbaImage> {
         .iter()
         .find(|output| output.name == name)
         .ok_or_else(|| anyhow::anyhow!("wayland output {name} disappeared"))?;
-    let img = conn.screenshot_single_output(output, false)?;
+    let img = conn.screenshot_single_output(output, include_cursor())?;
     let rgba = img.to_rgba8();
     RgbaImage::from_raw(rgba.width(), rgba.height(), rgba.into_vec())
         .ok_or_else(|| anyhow::anyhow!("screencopy buffer size mismatch"))

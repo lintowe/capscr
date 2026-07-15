@@ -38,18 +38,30 @@ fn result_u32(results: &HashMap<String, OwnedValue>, key: &str) -> Result<u32> {
 
 // grab a logical rectangle straight from the compositor. coordinates are in the
 // same logical space capscr uses for monitors, so a monitor's x/y/w/h maps 1:1.
-pub fn capture_area(x: i32, y: i32, width: u32, height: u32) -> Result<RgbaImage> {
-    capture_area_with_resolution(x, y, width, height, false)
+pub fn capture_area(
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+    include_cursor: bool,
+) -> Result<RgbaImage> {
+    capture_area_with_resolution(x, y, width, height, false, include_cursor)
 }
 
-pub fn capture_area_native(x: i32, y: i32, width: u32, height: u32) -> Result<RgbaImage> {
-    capture_area_with_resolution(x, y, width, height, true)
+pub fn capture_area_native(
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+    include_cursor: bool,
+) -> Result<RgbaImage> {
+    capture_area_with_resolution(x, y, width, height, true, include_cursor)
 }
 
-pub fn capture_screen(output_name: &str) -> Result<RgbaImage> {
+pub fn capture_screen(output_name: &str, include_cursor: bool) -> Result<RgbaImage> {
     capture_request(|conn, output| {
         let mut options: HashMap<&str, Value> = HashMap::new();
-        options.insert("include-cursor", Value::from(false));
+        options.insert("include-cursor", Value::from(include_cursor));
         options.insert("native-resolution", Value::from(true));
         Ok(conn.call_method(
             Some("org.kde.KWin.ScreenShot2"),
@@ -67,13 +79,14 @@ fn capture_area_with_resolution(
     width: u32,
     height: u32,
     native_resolution: bool,
+    include_cursor: bool,
 ) -> Result<RgbaImage> {
     if width == 0 || height == 0 {
         return Err(anyhow!("refusing to capture a zero-sized area"));
     }
     capture_request(|conn, output| {
         let mut options: HashMap<&str, Value> = HashMap::new();
-        options.insert("include-cursor", Value::from(false));
+        options.insert("include-cursor", Value::from(include_cursor));
         options.insert("native-resolution", Value::from(native_resolution));
         Ok(conn.call_method(
             Some("org.kde.KWin.ScreenShot2"),

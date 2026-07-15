@@ -27,8 +27,14 @@ impl CursorShot {
 pub fn capture_cursor_shot() -> Option<CursorShot> {
     #[cfg(windows)]
     let fetched = windows_impl::fetch_cursor();
+    // on wayland the compositor bakes the pointer into grabs when asked;
+    // compositing xwayland's cursor on top would double-draw it
     #[cfg(target_os = "linux")]
-    let fetched = x11_impl::fetch_cursor();
+    let fetched = if crate::capture::is_wayland_session() {
+        None
+    } else {
+        x11_impl::fetch_cursor()
+    };
     #[cfg(not(any(windows, target_os = "linux")))]
     let fetched: Option<(RgbaImage, i32, i32)> = None;
 

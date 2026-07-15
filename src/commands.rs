@@ -306,6 +306,11 @@ fn run_capture_pipeline_inner(
     }
     let _gate = CaptureGate(&gate_state.capture_in_progress);
 
+    // wayland compositors bake the pointer into the grab; windows composites
+    // it afterwards, so this hint only steers the linux capture calls
+    #[cfg(target_os = "linux")]
+    crate::capture::set_include_cursor(gate_state.config.lock().unwrap().capture.show_cursor);
+
     // keep capscr itself out of the frozen desktop when capture is triggered
     // from an open hub or a second-instance jump command
     let hub_was_visible = app
@@ -620,7 +625,8 @@ fn run_capture_pipeline_inner(
         }
         #[cfg(target_os = "linux")]
         SelectionResult::WaylandWindow { handle, x, y } => {
-            let image = crate::capture::capture_wayland_window_handle(&handle, false)?;
+            let include_cursor = gate_state.config.lock().unwrap().capture.show_cursor;
+            let image = crate::capture::capture_wayland_window_handle(&handle, include_cursor)?;
             (image, None, Some((x, y)))
         }
         #[cfg(not(target_os = "linux"))]
@@ -2271,6 +2277,10 @@ fn start_gif_recording(
             crate::recording::RecordingFormat::Gif
         },
     };
+
+    // steer the wayland frame grabs; windows composites the cursor per frame
+    #[cfg(target_os = "linux")]
+    crate::capture::set_include_cursor(cfg.capture.show_cursor);
 
     let mut recorder = GifRecorder::new(settings).with_region(region);
     recorder.start()?;
