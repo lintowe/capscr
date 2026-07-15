@@ -2173,12 +2173,19 @@ kbd {
 }
 
 
-/* linux recording control bar */
+/* linux recording control bar: the window can come up larger than asked on
+   gtk-wayland, so the bar is a fixed-size pill anchored to the top-left (the
+   pinned position) and everything else stays transparent */
 .recbar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 100vh;
+  width: 148px;
+  height: 36px;
   padding: 0 10px;
   background: var(--ink-0);
   border: 1px solid var(--rule-2);

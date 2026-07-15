@@ -855,6 +855,7 @@ dependencies = [
  "wasapi",
  "wasmtime",
  "wat",
+ "wayland-backend",
  "wayland-client",
  "wayland-protocols",
  "wayland-protocols-plasma",

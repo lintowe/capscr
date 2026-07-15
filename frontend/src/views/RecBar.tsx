@@ -16,7 +16,14 @@ export function RecBar() {
   onCleanup(() => clearInterval(tick));
 
   onMount(() => {
+    // clear every layer of the app background so only the pill shows; the
+    // window itself can come up larger than the bar on gtk-wayland
+    document.documentElement.style.background = "transparent";
     document.body.style.background = "transparent";
+    const root = document.getElementById("root");
+    if (root) {
+      root.style.background = "transparent";
+    }
   });
 
   const stop = () => {

@@ -541,6 +541,9 @@ pub mod linux_impl {
     const BAR_H: f64 = 36.0;
 
     static ON_STOP: Mutex<Option<Box<dyn Fn() + Send>>> = Mutex::new(None);
+    // holds the recbar's plasma-shell role objects for the recording's
+    // lifetime; dropped (and destroyed) on stop so nothing leaks per run
+    static PLASMA_GRANT: Mutex<Option<crate::overlay::plasma_ffi::PlasmaGrant>> = Mutex::new(None);
 
     pub fn start(region: Rectangle, _max_secs: u64, on_stop: Box<dyn Fn() + Send>) {
         let Some(app) = crate::overlay::linux::app_handle() else {
@@ -582,17 +585,58 @@ pub mod linux_impl {
                 .inner_size(BAR_W, BAR_H)
                 .min_inner_size(BAR_W, BAR_H)
                 .max_inner_size(BAR_W, BAR_H)
+                .transparent(true)
+                .visible(false)
                 .build();
             match built {
                 Ok(window) => {
                     // the builder's size request gets dropped on the
                     // gtk-wayland path and the window balloons to gtk's
                     // 200x200 default; pin it at the toolkit level
-                    use gtk::prelude::GtkWindowExt;
+                    use gtk::prelude::{Cast, GtkWindowExt};
                     if let Ok(gtk_window) = window.gtk_window() {
                         gtk_window.set_default_size(BAR_W as i32, BAR_H as i32);
                         gtk_window.resize(BAR_W as i32, BAR_H as i32);
+                        // the webview child's size request outvotes resize();
+                        // a max-size geometry hint is the one clamp gtk always
+                        // honors, otherwise the bar balloons past 148x36
+                        let geometry = gtk::gdk::Geometry::new(
+                            BAR_W as i32,
+                            BAR_H as i32,
+                            BAR_W as i32,
+                            BAR_H as i32,
+                            0,
+                            0,
+                            0,
+                            0,
+                            0.0,
+                            0.0,
+                            gtk::gdk::Gravity::NorthWest,
+                        );
+                        gtk_window.set_geometry_hints(
+                            Option::<&gtk::Widget>::None,
+                            Some(&geometry),
+                            gtk::gdk::WindowHints::MIN_SIZE | gtk::gdk::WindowHints::MAX_SIZE,
+                        );
+                        // wayland ignores position(); kde's plasma-shell role
+                        // places the bar at the region corner and keeps it
+                        // above the (possibly fullscreen) recorded app. the
+                        // role must land before first map, hence
+                        // visible(false) above.
+                        if crate::capture::gui_is_wayland() {
+                            match crate::overlay::plasma_ffi::pin_gtk_window(
+                                gtk_window.upcast_ref(),
+                                x as i32,
+                                y as i32,
+                            ) {
+                                Ok(grant) => *PLASMA_GRANT.lock().unwrap() = Some(grant),
+                                Err(e) => {
+                                    tracing::warn!("recbar plasma pinning unavailable: {e:#}")
+                                }
+                            }
+                        }
                     }
+                    let _ = window.show();
                 }
                 Err(e) => tracing::warn!("recording bar window failed: {e}"),
             }
@@ -601,6 +645,9 @@ pub mod linux_impl {
 
     pub fn stop() {
         *ON_STOP.lock().unwrap() = None;
+        if let Some(grant) = PLASMA_GRANT.lock().unwrap().take() {
+            grant.plasma_surface.destroy();
+        }
         let Some(app) = crate::overlay::linux::app_handle() else {
             return;
         };
