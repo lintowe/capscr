@@ -499,6 +499,77 @@ pub fn select(frozen_frame: Option<Arc<RgbaImage>>) -> SelectionResult {
         }]
     };
 
+    if pure_wayland {
+        let outputs = surfaces
+            .iter()
+            .filter_map(|surface| {
+                Some(super::wayland_native_selector::NativeOutput {
+                    output_name: surface.output_name.clone()?,
+                    image: surface.frame.clone(),
+                    rect: Rectangle::new(
+                        surface.rect.0,
+                        surface.rect.1,
+                        surface.rect.2,
+                        surface.rect.3,
+                    ),
+                    windows: surface
+                        .windows
+                        .iter()
+                        .map(|window| super::wayland_native_selector::NativeWindow {
+                            id: window.id,
+                            handle: window.handle.clone(),
+                            rect: Rectangle::new(window.x, window.y, window.width, window.height),
+                        })
+                        .collect(),
+                })
+            })
+            .collect();
+        match super::wayland_native_selector::NativeSelector::show(outputs) {
+            Ok(selector) => {
+                let outcome = selector.recv_timeout(SELECT_TIMEOUT);
+                return match outcome {
+                    Ok(super::wayland_native_selector::NativeOutcome::Region(rect))
+                    | Ok(super::wayland_native_selector::NativeOutcome::Monitor(rect, _)) => {
+                        compose_frozen_region(rect, &surfaces).map_or(
+                            SelectionResult::Region(rect),
+                            |image| SelectionResult::FrozenRegion {
+                                rect,
+                                image: Arc::new(image),
+                            },
+                        )
+                    }
+                    Ok(super::wayland_native_selector::NativeOutcome::Window(window)) => {
+                        compose_frozen_region(window.rect, &surfaces).map_or_else(
+                            || match window.handle {
+                                Some(handle) => SelectionResult::WaylandWindow {
+                                    handle,
+                                    x: window.rect.x,
+                                    y: window.rect.y,
+                                },
+                                None => SelectionResult::Window(window.id),
+                            },
+                            |image| SelectionResult::FrozenRegion {
+                                rect: window.rect,
+                                image: Arc::new(image),
+                            },
+                        )
+                    }
+                    Ok(super::wayland_native_selector::NativeOutcome::Cancelled) => {
+                        SelectionResult::Cancelled
+                    }
+                    Ok(super::wayland_native_selector::NativeOutcome::Color(r, g, b)) => {
+                        SelectionResult::PickedColor(r, g, b)
+                    }
+                    Err(error) => {
+                        tracing::warn!("native selector timed out: {error}");
+                        SelectionResult::Cancelled
+                    }
+                };
+            }
+            Err(error) => tracing::debug!("using webview selector: {error:#}"),
+        }
+    }
+
     let focus_label = active_output
         .and_then(|name| {
             monitors
