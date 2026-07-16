@@ -10,7 +10,6 @@
 // run_on_main_thread. on wayland each webview is fullscreened on its output.
 
 use std::collections::HashSet;
-use std::ffi::{c_char, c_int, c_void, CString};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
@@ -49,105 +48,6 @@ struct SelectorSurface {
 static ACTIVE: Mutex<Option<ActiveSelection>> = Mutex::new(None);
 // prewarmed window list, filled on a background thread ahead of select()
 static PREWARMED: Mutex<Option<Receiver<Vec<WindowRect>>>> = Mutex::new(None);
-
-struct LayerShellApi {
-    _library: usize,
-    is_supported: unsafe extern "C" fn() -> c_int,
-    init_for_window: unsafe extern "C" fn(*mut gtk::ffi::GtkWindow),
-    set_layer: unsafe extern "C" fn(*mut gtk::ffi::GtkWindow, c_int),
-    set_anchor: unsafe extern "C" fn(*mut gtk::ffi::GtkWindow, c_int, c_int),
-    set_monitor: unsafe extern "C" fn(*mut gtk::ffi::GtkWindow, *mut gtk::gdk::ffi::GdkMonitor),
-    set_keyboard_mode: unsafe extern "C" fn(*mut gtk::ffi::GtkWindow, c_int),
-    set_namespace: unsafe extern "C" fn(*mut gtk::ffi::GtkWindow, *const c_char),
-}
-
-unsafe impl Send for LayerShellApi {}
-unsafe impl Sync for LayerShellApi {}
-
-static LAYER_SHELL: OnceLock<Option<LayerShellApi>> = OnceLock::new();
-
-unsafe extern "C" {
-    fn dlopen(filename: *const c_char, flags: c_int) -> *mut c_void;
-    fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
-}
-
-fn layer_shell_api() -> Option<&'static LayerShellApi> {
-    LAYER_SHELL
-        .get_or_init(|| unsafe {
-            let library_name = CString::new("libgtk-layer-shell.so.0").unwrap();
-            let library = dlopen(library_name.as_ptr(), 2);
-            if library.is_null() {
-                return None;
-            }
-            macro_rules! symbol {
-                ($name:literal, $kind:ty) => {{
-                    let name = CString::new($name).unwrap();
-                    let symbol = dlsym(library, name.as_ptr());
-                    if symbol.is_null() {
-                        return None;
-                    }
-                    std::mem::transmute::<*mut c_void, $kind>(symbol)
-                }};
-            }
-            Some(LayerShellApi {
-                _library: library as usize,
-                is_supported: symbol!("gtk_layer_is_supported", unsafe extern "C" fn() -> c_int),
-                init_for_window: symbol!(
-                    "gtk_layer_init_for_window",
-                    unsafe extern "C" fn(*mut gtk::ffi::GtkWindow)
-                ),
-                set_layer: symbol!(
-                    "gtk_layer_set_layer",
-                    unsafe extern "C" fn(*mut gtk::ffi::GtkWindow, c_int)
-                ),
-                set_anchor: symbol!(
-                    "gtk_layer_set_anchor",
-                    unsafe extern "C" fn(*mut gtk::ffi::GtkWindow, c_int, c_int)
-                ),
-                set_monitor: symbol!(
-                    "gtk_layer_set_monitor",
-                    unsafe extern "C" fn(*mut gtk::ffi::GtkWindow, *mut gtk::gdk::ffi::GdkMonitor)
-                ),
-                set_keyboard_mode: symbol!(
-                    "gtk_layer_set_keyboard_mode",
-                    unsafe extern "C" fn(*mut gtk::ffi::GtkWindow, c_int)
-                ),
-                set_namespace: symbol!(
-                    "gtk_layer_set_namespace",
-                    unsafe extern "C" fn(*mut gtk::ffi::GtkWindow, *const c_char)
-                ),
-            })
-        })
-        .as_ref()
-}
-
-fn configure_layer_shell(window: &gtk::Window, monitor: &gtk::gdk::Monitor) -> bool {
-    use gtk::glib::translate::ToGlibPtr;
-    use gtk::prelude::WidgetExt;
-
-    let Some(api) = layer_shell_api() else {
-        return false;
-    };
-    if unsafe { (api.is_supported)() } == 0 {
-        return false;
-    }
-    if window.is_realized() {
-        window.unrealize();
-    }
-    let namespace = CString::new("capscr-selector").unwrap();
-    unsafe {
-        let window_ptr = window.to_glib_none().0;
-        (api.init_for_window)(window_ptr);
-        (api.set_namespace)(window_ptr, namespace.as_ptr());
-        (api.set_layer)(window_ptr, 3);
-        for edge in 0..4 {
-            (api.set_anchor)(window_ptr, edge, 1);
-        }
-        (api.set_monitor)(window_ptr, monitor.to_glib_none().0);
-        (api.set_keyboard_mode)(window_ptr, 2);
-    }
-    true
-}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct WindowRect {
@@ -690,7 +590,11 @@ fn build_selector_window(
                     })
                     .unwrap_or(0);
                 let layered = display.monitor(monitor_index).is_some_and(|monitor| {
-                    configure_layer_shell(gtk_window.upcast_ref(), &monitor)
+                    crate::shell::layer_shell::cover_output(
+                        gtk_window.upcast_ref(),
+                        &monitor,
+                        "capscr-selector",
+                    )
                 });
                 if !layered {
                     gtk_window.fullscreen_on_monitor(&screen, monitor_index);

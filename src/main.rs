@@ -12,6 +12,8 @@ mod overlay;
 mod plugin;
 mod recording;
 mod secret;
+#[cfg(target_os = "linux")]
+mod shell;
 mod sound;
 mod state;
 mod upload;
