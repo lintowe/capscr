@@ -159,6 +159,27 @@ pub fn pin_at(
     true
 }
 
+// move an already-pinned layer surface by only updating its margins. init
+// (pin_at) unrealizes and re-plumbs the window through the layer protocol,
+// which is a once-per-window operation — calling it on every pointer-move
+// while dragging would re-create the surface and flicker. this just nudges.
+pub fn set_position(window: &gtk::Window, monitor: &gtk::gdk::Monitor, global_x: i32, global_y: i32) {
+    use gtk::gdk::prelude::MonitorExt;
+    use gtk::glib::translate::ToGlibPtr;
+
+    let Some(api) = layer_shell_api() else {
+        return;
+    };
+    let geometry = monitor.geometry();
+    let left = (global_x - geometry.x()).max(0);
+    let top = (global_y - geometry.y()).max(0);
+    unsafe {
+        let window_ptr = window.to_glib_none().0;
+        (api.set_margin)(window_ptr, EDGE_LEFT, left);
+        (api.set_margin)(window_ptr, EDGE_TOP, top);
+    }
+}
+
 // the gdk monitor whose geometry contains a global logical point, for
 // handing pin_at the right output
 pub fn monitor_at(window: &gtk::Window, x: i32, y: i32) -> Option<gtk::gdk::Monitor> {

@@ -280,8 +280,8 @@ export const api = {
   evdevStatus: () => invoke<EvdevStatus>("evdev_status"),
   portalRebindShortcuts: () => invoke<void>("portal_rebind_shortcuts"),
   pinManualDrag: () => invoke<boolean>("pin_manual_drag"),
-  pinSetPosition: (label: string, x: number, y: number) =>
-    invoke<void>("pin_set_position", { label, x, y }),
+  pinMoveBy: (label: string, dx: number, dy: number) =>
+    invoke<void>("pin_move_by", { label, dx, dy }),
   dismissTrayHint: () => invoke<void>("dismiss_tray_hint"),
   setHotkeysDisabled: (disabled: boolean) =>
     invoke<void>("set_hotkeys_disabled", { disabled }),

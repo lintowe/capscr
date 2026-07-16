@@ -73,24 +73,21 @@ export function PinView(props: { label: string }) {
     api.pinManualDrag().then(setManualDrag).catch(() => {});
   });
 
+  // a layer surface reports no position, so send incremental pointer deltas
+  // and let the backend accumulate them against the pin's tracked spot
   const startManualDrag = (ev: PointerEvent) => {
     if (ev.button !== 0) return;
     ev.preventDefault();
-    const originX = ev.screenX;
-    const originY = ev.screenY;
-    const win = getCurrentWindow();
-    let baseX = 0;
-    let baseY = 0;
-    win.outerPosition().then((pos) => {
-      baseX = pos.x;
-      baseY = pos.y;
-    });
+    let lastX = ev.screenX;
+    let lastY = ev.screenY;
     const move = (m: PointerEvent) => {
-      api.pinSetPosition(
-        props.label,
-        Math.round(baseX + (m.screenX - originX)),
-        Math.round(baseY + (m.screenY - originY)),
-      ).catch(() => {});
+      const dx = m.screenX - lastX;
+      const dy = m.screenY - lastY;
+      lastX = m.screenX;
+      lastY = m.screenY;
+      if (dx !== 0 || dy !== 0) {
+        api.pinMoveBy(props.label, dx, dy).catch(() => {});
+      }
     };
     const up = () => {
       window.removeEventListener("pointermove", move);

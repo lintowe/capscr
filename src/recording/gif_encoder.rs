@@ -824,17 +824,25 @@ pub fn find_ffmpeg() -> std::path::PathBuf {
 }
 
 // probe the literal `ffmpeg` on PATH directly (not through ffmpeg_command,
-// which would recurse into find_ffmpeg)
+// which would recurse into find_ffmpeg). the result is cached: find_ffmpeg
+// runs several times per recording (availability check, encoder, audio, mux)
+// and a spawn-per-call would add avoidable latency to recording start.
+// caching false is safe — a later `apt install ffmpeg` is picked up on the
+// next process, and the data_dir download path still resolves within a run.
 #[cfg(target_os = "linux")]
 fn system_ffmpeg_runnable() -> bool {
-    std::process::Command::new("ffmpeg")
-        .arg("-version")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .and_then(|mut child| child.wait())
-        .map(|status| status.success())
-        .unwrap_or(false)
+    use std::sync::OnceLock;
+    static PRESENT: OnceLock<bool> = OnceLock::new();
+    *PRESENT.get_or_init(|| {
+        std::process::Command::new("ffmpeg")
+            .arg("-version")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .and_then(|mut child| child.wait())
+            .map(|status| status.success())
+            .unwrap_or(false)
+    })
 }
 
 pub fn is_ffmpeg_available() -> bool {

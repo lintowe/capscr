@@ -4018,6 +4018,17 @@ pub async fn pin_image(
     let window = builder.build().map_err(|e| e.to_string())?;
     watch_pin_navigation(&app, window.clone());
 
+    // drop the pin's tracked layer-shell position when its window goes away
+    #[cfg(target_os = "linux")]
+    {
+        let tracked = label.clone();
+        window.on_window_event(move |event| {
+            if matches!(event, tauri::WindowEvent::Destroyed) {
+                PIN_POSITIONS.lock().unwrap().remove(&tracked);
+            }
+        });
+    }
+
     // always_on_top is a no-op on wayland; keep the pin above other windows
     // via a compositor role. kde uses kwin scripting (keeps the pin a normal
     // draggable toplevel); wlroots compositors use layer-shell, which has no
@@ -4047,6 +4058,7 @@ pub async fn pin_image(
             // pins don't land exactly on top of one another
             let index = state.pinned_images.lock().unwrap().len().saturating_sub(1);
             let base = 48 + (index as i32 % 6) * 36;
+            PIN_POSITIONS.lock().unwrap().insert(label.clone(), (base, base));
             let app2 = app.clone();
             let label2 = label.clone();
             let _ = app.run_on_main_thread(move || {
@@ -4071,6 +4083,7 @@ pub async fn pin_image(
                     if pinned {
                         PIN_MANUAL_DRAG.store(true, std::sync::atomic::Ordering::Relaxed);
                     } else {
+                        PIN_POSITIONS.lock().unwrap().remove(&label2);
                         tracing::warn!("pin keep-above unavailable on this compositor");
                     }
                 }
@@ -4081,13 +4094,20 @@ pub async fn pin_image(
 }
 
 // true once any pin is placed via layer-shell, where the compositor won't
-// move the surface and PinView must drive dragging through pin_set_position
+// move the surface and PinView must drive dragging through pin_move_by
 #[cfg(target_os = "linux")]
 static PIN_MANUAL_DRAG: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
+// layer-shell pins have no compositor-reported position, so capscr tracks
+// each pin's global logical top-left here and applies drag deltas against it
+#[cfg(target_os = "linux")]
+static PIN_POSITIONS: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<String, (i32, i32)>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
 // whether pins need capscr-driven dragging (layer-shell path). the frontend
-// switches its drag region to pointer-delta + pin_set_position when true
+// switches its drag region to pointer-delta + pin_move_by when true
 #[tauri::command]
 pub fn pin_manual_drag() -> bool {
     #[cfg(target_os = "linux")]
@@ -4100,12 +4120,19 @@ pub fn pin_manual_drag() -> bool {
     }
 }
 
-// move a layer-shell pin by updating its margins (no compositor move exists
-// for layer surfaces). x/y are global logical coordinates.
+// nudge a layer-shell pin by a pointer delta. accumulates against the
+// tracked position and updates margins only (no surface re-init).
 #[tauri::command]
-pub fn pin_set_position(label: String, x: i32, y: i32, app: AppHandle) -> Result<(), String> {
+pub fn pin_move_by(label: String, dx: i32, dy: i32, app: AppHandle) -> Result<(), String> {
     #[cfg(target_os = "linux")]
     {
+        let (x, y) = {
+            let mut positions = PIN_POSITIONS.lock().unwrap();
+            let entry = positions.entry(label.clone()).or_insert((48, 48));
+            entry.0 = (entry.0 + dx).max(0);
+            entry.1 = (entry.1 + dy).max(0);
+            *entry
+        };
         let app2 = app.clone();
         let _ = app.run_on_main_thread(move || {
             use gtk::prelude::Cast;
@@ -4115,14 +4142,7 @@ pub fn pin_set_position(label: String, x: i32, y: i32, app: AppHandle) -> Result
             if let Ok(gtk_window) = win.gtk_window() {
                 let gtk_win: &gtk::Window = gtk_window.upcast_ref();
                 if let Some(monitor) = crate::shell::layer_shell::monitor_at(gtk_win, x, y) {
-                    crate::shell::layer_shell::pin_at(
-                        gtk_win,
-                        &monitor,
-                        crate::shell::layer_shell::LAYER_TOP,
-                        x,
-                        y,
-                        true,
-                    );
+                    crate::shell::layer_shell::set_position(gtk_win, &monitor, x, y);
                 }
             }
         });
@@ -4130,8 +4150,8 @@ pub fn pin_set_position(label: String, x: i32, y: i32, app: AppHandle) -> Result
     }
     #[cfg(not(target_os = "linux"))]
     {
-        let _ = (label, x, y, app);
-        Err("pin_set_position only applies on Linux Wayland".into())
+        let _ = (label, dx, dy, app);
+        Err("pin_move_by only applies on Linux Wayland".into())
     }
 }
 

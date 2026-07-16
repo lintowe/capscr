@@ -312,7 +312,7 @@ fn main() {
             commands::evdev_status,
             commands::portal_rebind_shortcuts,
             commands::pin_manual_drag,
-            commands::pin_set_position,
+            commands::pin_move_by,
             commands::dismiss_tray_hint,
             commands::set_hotkeys_disabled,
             commands::start_hotkey_capture,
