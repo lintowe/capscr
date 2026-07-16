@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>capscr recording</title>
+    <style>
+      /* the recording bar window can come up larger than the pill on
+         gtk-wayland; everything outside the pill must stay transparent */
+      html,
+      body,
+      #root {
+        margin: 0;
+        background: transparent;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/recbar-main.tsx"></script>
+  </body>
+</html>

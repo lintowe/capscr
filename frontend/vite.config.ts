@@ -26,5 +26,13 @@ export default defineConfig({
     target: "esnext",
     minify: "esbuild",
     sourcemap: false,
+    rollupOptions: {
+      input: {
+        // the recording bar loads its own minimal page so no shared boot
+        // splash or hub chrome can ever paint behind the pill
+        main: resolve(dirname(fileURLToPath(import.meta.url)), "index.html"),
+        recbar: resolve(dirname(fileURLToPath(import.meta.url)), "recbar.html"),
+      },
+    },
   },
 });

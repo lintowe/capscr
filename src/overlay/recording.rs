@@ -574,7 +574,7 @@ pub mod linux_impl {
             if let Some(stale) = app2.get_webview_window(LABEL) {
                 let _ = stale.destroy();
             }
-            let url = tauri::WebviewUrl::App("index.html".into());
+            let url = tauri::WebviewUrl::App("recbar.html".into());
             let built = tauri::WebviewWindowBuilder::new(&app2, LABEL, url)
                 .title("capscr recording")
                 .decorations(false)
