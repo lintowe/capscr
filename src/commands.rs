@@ -2481,6 +2481,7 @@ fn run_gif_task(task: &CaptureTask, app: &AppHandle) -> anyhow::Result<()> {
         SelectionResult::Region(r) => r,
         // the selector hands back frozen pixels with the rect; recording only
         // needs the rect
+        #[cfg(target_os = "linux")]
         SelectionResult::FrozenRegion { rect, .. } => rect,
         SelectionResult::Cancelled => return Ok(()),
         _ => {
