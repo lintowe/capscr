@@ -15,7 +15,7 @@ Per-hotkey task model. Each hotkey binds a capture mode (region, region-last, wi
 
 Selection overlay: drag for region, click for window, Enter for fullscreen, `Alt+click` for color picker (pixel `#RRGGBB` copied to clipboard). Live `WxH @ X,Y` readout, 8× magnifier loupe, window-snap highlight.
 
-Recording: region GIF and H.264 MP4 (MP4 via ffmpeg, auto-downloaded on first use on Windows) with a live timer + stop control drawn outside the captured area and frames timed to real wall-clock playback. The mouse cursor is composited into recordings and screenshots when **show cursor** is enabled.
+Recording: region GIF and H.264 MP4 (MP4 via ffmpeg, auto-downloaded and sha256-verified on first use; on Linux a distro ffmpeg on PATH is preferred) with a live timer + stop control drawn outside the captured area and frames timed to real wall-clock playback. The mouse cursor is composited into recordings and screenshots when **show cursor** is enabled.
 
 In-app editor: arrows, text, blur, step numbers, and crop, reached via the "open in editor" post-action.
 
@@ -41,7 +41,21 @@ Download from the [releases page](https://github.com/zeo/capscr/releases/latest)
 | `capscr_x.x.x_amd64.AppImage` | any distro — `chmod +x` and run; this is the build the Linux auto-updater tracks |
 | `latest.json` | auto-updater manifest, not for manual install |
 
-Windows 10 1903+ or a Linux desktop with webkit2gtk 4.1 and glibc 2.39+ (Ubuntu 24.04+, Debian 13+, Fedora 40+, or equivalents). On Linux, X11 sessions get the full feature set; recording MP4 wants `ffmpeg` on PATH, the OCR post-action wants `tesseract`, and file-clipboard on X11 wants `xclip` — the deb/rpm packages pull these in as recommends. Wayland supports still capture on one output at a time. Global hotkeys, recording, and window picking require an X11 session.
+Windows 10 1903+ or a Linux desktop with webkit2gtk 4.1 and glibc 2.39+ (Ubuntu 24.04+, Debian 13+, Fedora 40+, or equivalents). Recording MP4 wants `ffmpeg`, the OCR post-action wants `tesseract`, and file-clipboard on X11 wants `xclip` — the deb/rpm packages pull these in as recommends.
+
+Both X11 and Wayland are supported. On Wayland the pixel source is chosen per compositor: KDE uses KWin's authorized ScreenShot2, wlroots compositors (sway, Hyprland, COSMIC, …) use the `ext-image-copy-capture` protocol, and GNOME uses the screenshot / screencast portals. Feature coverage by session:
+
+| feature | X11 | KDE Wayland | wlroots Wayland | GNOME Wayland |
+|---|---|---|---|---|
+| region / fullscreen / monitor capture, editor, upload, GIF + MP4 recording | ✅ | ✅ | ✅ | ✅ |
+| window picking | capscr overlay | KWin picker | capscr overlay | GNOME's portal picker |
+| keyboard global hotkeys | ✅ (X grabs) | ✅ (GlobalShortcuts portal) | portal if present, else Advanced input | ✅ (GlobalShortcuts portal) |
+| mouse side-button hotkeys | Advanced input | Advanced input | Advanced input | Advanced input |
+| recording bar / pin kept above fullscreen | ✅ | ✅ | ✅ (layer-shell) | best-effort |
+| tray icon | ✅ | ✅ | depends on host | needs the AppIndicator extension |
+| HDR-preserved capture | — | — | — | — |
+
+"Advanced input" is an opt-in in **hub → Settings → hotkeys** that reads `/dev/input` directly (needs membership in the `input` group); it powers mouse side-button hotkeys and keyboard hotkeys on Wayland compositors without the GlobalShortcuts portal. HDR-preserved capture is Windows-only: no Linux compositor exposes HDR pixels to a capture client yet (run `capscr --wayland-diag` for a per-output readout), so Linux captures are SDR. On a desktop with no system tray (vanilla GNOME), capscr opens its hub with guidance and stays reachable through global hotkeys, the desktop-file capture actions, and relaunching the app.
 
 ## default hotkeys
 
@@ -57,7 +71,7 @@ Hold `Alt` while the selection overlay is up and click any pixel to copy its `#R
 
 ## configuration
 
-Settings live at `%APPDATA%\capscr\config.toml` (`~/.config/capscr/config.toml` on Linux) and are editable in **hub → Settings**. Notable fields:
+Settings live at `%APPDATA%\com.capscr.capscr\config\config.toml` on Windows and `~/.config/capscr/config.toml` on Linux, editable in **hub → Settings**. Notable fields:
 
 ```toml
 [capture.hdr]
@@ -85,6 +99,17 @@ password = "secret"           # or set private_key_path; migrated to the per-use
 remote_dir = "/screenshots"
 public_url_template = "https://files.example.com/{filename}"
 ```
+
+For SFTP prefer an Ed25519 key (`private_key_path`): the pure-Rust RSA implementation has a known timing side-channel (RUSTSEC-2023-0071) with no upstream fix, and Ed25519 avoids that code path.
+
+### where capscr stores things
+
+Two directory trees, by design, on both platforms:
+
+- **config, plugins, history, sound cache, downloaded ffmpeg, thumbnails** — under the `com.capscr.capscr` app dirs (`%APPDATA%\com.capscr.capscr` and `%LOCALAPPDATA%\com.capscr.capscr` on Windows; `~/.config/capscr`, `~/.local/share/capscr`, `~/.cache/capscr` on Linux).
+- **window-state, updater bookkeeping, notification / taskbar identity** — under the Tauri app identifier `io.rot.capscr`.
+
+The split is intentional: the identifiers are load-bearing (the updater's continuity, KDE's ScreenShot2 desktop-file grant, and the Windows AppUserModelID all key off `io.rot.capscr`), so they are not unified.
 
 ## build from source
 

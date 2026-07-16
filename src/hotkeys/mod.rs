@@ -334,9 +334,9 @@ fn code_to_vk(c: Code) -> Option<u32> {
 }
 
 // linux: the OS-level grabs registered by flush_to_hook, and the id→task map
-// the dispatch thread uses to route GlobalHotKeyEvents. X11 only — on wayland
-// registration fails and surfaces as a per-task "failed" status chip until
-// the GlobalShortcuts portal backend lands.
+// the dispatch thread uses to route GlobalHotKeyEvents. X11 keyboard only —
+// wayland keyboard shortcuts go through the GlobalShortcuts portal
+// (portal_linux), and mouse side buttons through evdev on both sessions.
 #[cfg(target_os = "linux")]
 mod linux_grabs {
     use std::collections::HashMap;

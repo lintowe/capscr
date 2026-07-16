@@ -942,15 +942,16 @@ pub fn is_black_frame(img: &RgbaImage) -> bool {
 
 // capture a single monitor as an oriented, opaque RGBA image.
 //
-// HDR monitors default to the Direct2D HdrToneMap pipeline — the same path
-// active-monitor capture uses — which tonemaps correctly and builds a fresh
-// D3D device per call. the previous freeze-frame path reused the cached
-// duplication device that poisons over uptime and handed back black slices
-// that fell through to GDI-on-HDR (transparent black), which was the
-// selector black-screen bug. the CPU-tonemap and WGC paths stay reachable
-// via their env opt-ins. SDR monitors use GDI BitBlt. any slice that still
-// comes back fully black is retried through GDI before being accepted, and
-// a fully-transparent slice is forced opaque
+// HDR monitors go through the CPU BT.2390 tonemap path (HdrCapture, the same
+// path active-monitor capture uses), which builds a fresh D3D device per
+// call. the previous freeze-frame path reused the cached duplication device
+// that poisons over uptime and handed back black slices that fell through to
+// GDI-on-HDR (transparent black), which was the selector black-screen bug.
+// the WGC path (OS-side tonemap) and the Direct2D HdrToneMap path stay
+// reachable via their env opt-ins / the --d2d-sweep diagnostic. SDR monitors
+// use GDI BitBlt. any slice that still comes back fully black is retried
+// through GDI before being accepted, and a fully-transparent slice is forced
+// opaque
 #[cfg(windows)]
 pub fn capture_one_monitor(monitor: &MonitorInfo) -> Result<RgbaImage> {
     let center = (

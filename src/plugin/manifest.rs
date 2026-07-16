@@ -93,13 +93,22 @@ impl PluginManifest {
                 );
             }
             // runtime.file is joined onto the plugin dir at load time, so it
-            // must stay inside it. a string check on '/' alone misses windows
-            // drive-absolute paths like `C:/x` (Path::join would then replace
-            // the base and load an arbitrary file), so validate the components
+            // must stay inside it. a windows drive-absolute path like `C:/x`
+            // parses as a plain relative path on unix (no Prefix component),
+            // so a manifest crafted on/for one OS must be rejected on both —
+            // check the drive-letter shape explicitly rather than relying on
+            // the host's Path semantics.
             let file = Path::new(&rt.file);
+            let has_drive_prefix = rt
+                .file
+                .as_bytes()
+                .first()
+                .is_some_and(|b| b.is_ascii_alphabetic())
+                && rt.file.as_bytes().get(1) == Some(&b':');
             if rt.file.is_empty()
                 || rt.file.contains('\\')
                 || file.is_absolute()
+                || has_drive_prefix
                 || file.components().any(|c| {
                     matches!(
                         c,
@@ -210,10 +219,9 @@ mod tests {
         assert!(manifest_with_file("../escape.wasm").validate().is_err());
         assert!(manifest_with_file("/abs.wasm").validate().is_err());
         assert!(manifest_with_file(r"C:\win.wasm").validate().is_err());
-        // windows drive-absolute with forward slash — the case the old string
-        // check missed. only parses as absolute on windows (this is a
-        // windows-only app), so the assertion is gated to match
-        #[cfg(windows)]
+        // windows drive-absolute with a forward slash parses as relative on
+        // unix, so the explicit drive-prefix check rejects it on every OS —
+        // a manifest is portable and can't smuggle an absolute path across
         assert!(manifest_with_file("C:/win.wasm").validate().is_err());
     }
 

@@ -1,21 +1,30 @@
 # cargo-audit configuration.
 #
-# every advisory ignored here has a one-line rationale next to it explaining
-# why it doesn't apply to capscr's threat model. when the underlying dep ships
-# a fix or when our usage changes, the entry should be re-evaluated.
+# every advisory ignored here has a rationale next to it explaining why it
+# doesn't apply to capscr's threat model. capscr ships on both Windows and
+# Linux (deb / rpm / AppImage), so a rationale that leans on "Windows-only"
+# is not valid — the GTK/webkit/unic/quick-xml stack is linked and shipped in
+# the Linux artifacts. when a dep ships a fix or our usage changes, the entry
+# is re-evaluated.
 
 [advisories]
 ignore = [
-    # rsa Marvin Attack (timing side-channel during RSA private-key decryption).
-    # we don't perform RSA private-key operations: SFTP path uses password auth
-    # only, and the host-key TOFU path only does public-key signature
-    # verification (which the attack does not affect). pulled in transitively
-    # via russh; no fix exists upstream.
+    # rsa Marvin Attack (timing side-channel during RSA private-key
+    # operations). this CAN occur: the SFTP destination supports private-key
+    # auth (upload.sftp.private_key_path) and russh is built with the `rsa`
+    # feature, so an RSA identity performs private-key signing during the
+    # handshake. the exposure is a timing side-channel observable only by the
+    # SFTP server the user themselves configured and points at, across many
+    # handshakes — narrow, and not remotely reachable by a third party. no
+    # upstream fix exists (pure-Rust rsa has no constant-time path yet). the
+    # README recommends Ed25519 keys, which avoid the affected code entirely.
     "RUSTSEC-2023-0071",
 
-    # the gtk/gdk/atk/glib/cairo/javascriptcore/webkit2gtk family is wry's
-    # linux backend. capscr is Windows-only — these crates are never linked
-    # into our shipping binary. unmaintained warnings (yellow), not vulns.
+    # gtk3 / gdk / atk / glib / cairo / javascriptcore / webkit2gtk: wry's
+    # Linux display backend, linked into the Linux builds. these are
+    # unmaintained-notice advisories (informational), not vulnerabilities.
+    # gtk3-rs is the only toolkit wry / tauri v2 support on Linux today;
+    # moving off it waits on tauri's gtk4 migration. revisit each tauri minor.
     "RUSTSEC-2024-0411",  # gdkwayland-sys
     "RUSTSEC-2024-0412",  # gdk
     "RUSTSEC-2024-0413",  # atk
@@ -32,8 +41,10 @@ ignore = [
     "RUSTSEC-2024-0436",  # paste unmaintained
     "RUSTSEC-2024-0370",  # proc-macro-error unmaintained
 
-    # unic-* family is unicode data tables pulled in transitively by the linux
-    # webkit2gtk text-shaping path. unused on Windows.
+    # unic-* family: static Unicode data tables reached through the Linux
+    # webkit text-shaping path, linked in the Linux builds. informational
+    # unmaintained notices; the crates parse no untrusted input (compile-time
+    # generated tables), so there is no runtime attack surface.
     "RUSTSEC-2025-0075",  # unic-char-range
     "RUSTSEC-2025-0080",  # unic-common
     "RUSTSEC-2025-0081",  # unic-char-property
@@ -41,13 +52,14 @@ ignore = [
     "RUSTSEC-2025-0100",  # unic-ucd-ident
 
     # quick-xml DoS advisories (quadratic duplicate-attribute scan; unbounded
-    # namespace-declaration allocation). the only two quick-xml copies still on
-    # <0.41 are pulled exclusively by linux display-stack crates that never link
-    # into the Windows binary: 0.30.0 via xcb (X11), 0.39.4 via wayland-scanner
-    # (Wayland). the Windows runtime and macOS build paths were moved to
-    # quick-xml 0.41 by bumping plist and dropping tauri-winrt-notification's
-    # quick-xml dep. re-check when a wry release retires the vendored X11/Wayland
-    # crates.
-    "RUSTSEC-2026-0194",  # quick-xml quadratic attribute check (xcb/wayland only)
-    "RUSTSEC-2026-0195",  # quick-xml unbounded namespace alloc (xcb/wayland only)
+    # namespace-declaration allocation) against copies still on <0.41. verified
+    # with `cargo tree -i quick-xml@<ver> --target x86_64-unknown-linux-gnu
+    # -e all`: both are BUILD-time only and never link into the runtime binary
+    # — 0.30.0 is a [build-dependencies] of xcb (its build script parses the
+    # vendored X11 protocol XML) and 0.39.4 is used by the wayland-scanner
+    # proc-macro (compile-time codegen against vendored Wayland protocol XML).
+    # neither parses attacker-controlled input at runtime. re-check when xcb /
+    # wayland-scanner bump to quick-xml 0.41.
+    "RUSTSEC-2026-0194",  # quick-xml quadratic attribute check (build-time only)
+    "RUSTSEC-2026-0195",  # quick-xml unbounded namespace alloc (build-time only)
 ]
