@@ -628,20 +628,38 @@ pub fn wayland_freeze_output(name: &str) -> Result<RgbaImage> {
     portal_grab_monitor(&monitor)
 }
 
-// native-resolution single-output screencopy; libwayshot applies the output
-// transform, so rotated outputs come back in logical orientation
+// native-resolution single-output screencopy. the single-output api hands
+// back the scanned-out buffer without applying the output transform, so
+// rotated outputs are turned into logical orientation here, mirroring
+// libwayshot's own composite path.
 #[cfg(target_os = "linux")]
 fn wlroots_freeze_output(name: &str) -> Result<RgbaImage> {
+    use wayland_client::protocol::wl_output::Transform;
     let conn = libwayshot_xcap::WayshotConnection::new()?;
     let outputs = conn.get_all_outputs();
     let output = outputs
         .iter()
         .find(|output| output.name == name)
         .ok_or_else(|| anyhow::anyhow!("wayland output {name} disappeared"))?;
+    let transform = output.transform;
     let img = conn.screenshot_single_output(output, include_cursor())?;
     let rgba = img.to_rgba8();
-    RgbaImage::from_raw(rgba.width(), rgba.height(), rgba.into_vec())
-        .ok_or_else(|| anyhow::anyhow!("screencopy buffer size mismatch"))
+    let frame = RgbaImage::from_raw(rgba.width(), rgba.height(), rgba.into_vec())
+        .ok_or_else(|| anyhow::anyhow!("screencopy buffer size mismatch"))?;
+    Ok(match transform {
+        Transform::_90 => image::imageops::rotate90(&frame),
+        Transform::_180 => image::imageops::rotate180(&frame),
+        Transform::_270 => image::imageops::rotate270(&frame),
+        Transform::Flipped => image::imageops::flip_horizontal(&frame),
+        Transform::Flipped90 => image::imageops::rotate90(&image::imageops::flip_horizontal(&frame)),
+        Transform::Flipped180 => {
+            image::imageops::rotate180(&image::imageops::flip_horizontal(&frame))
+        }
+        Transform::Flipped270 => {
+            image::imageops::rotate270(&image::imageops::flip_horizontal(&frame))
+        }
+        _ => frame,
+    })
 }
 
 // persistent per-recording grabber for wayland sessions, mirroring
