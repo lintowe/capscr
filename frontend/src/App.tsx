@@ -98,6 +98,7 @@ function Hub() {
   const [dragOver, setDragOver] = createSignal(false);
   const [updateInfo, setUpdateInfo] = createSignal<UpdateInfo | null>(null);
   const [updateDismissed, setUpdateDismissed] = createSignal(false);
+  const [trayMissing, setTrayMissing] = createSignal(false);
   const [updating, setUpdating] = createSignal(false);
   const [showShortcuts, setShowShortcuts] = createSignal(false);
   const [hotkeyDiag, { refetch: refetchHotkeyDiag }] = createResource<HotkeyDiagnostics>(
@@ -190,6 +191,10 @@ function Hub() {
         setRecordingSince(null);
         stopTick();
       }),
+      // fired at startup on desktops with no system-tray host (vanilla
+      // gnome); the hub is already open, this just explains why there's no
+      // tray icon and how to keep reaching capscr
+      await listen("capscr://tray-missing", () => setTrayMissing(true)),
       // the hub window is reused for the whole process, so this resource loads
       // once at first mount; refetch it when a capture lands so the statusbar
       // count actually tracks new screenshots and recordings
@@ -476,6 +481,44 @@ function Hub() {
       <main class="content">
         {/* in normal flow at the top of the content area so it pushes the view
             down instead of overlaying the view title */}
+        <Show when={trayMissing()}>
+          <div class="update-banner">
+            <span class="update-banner-glyph">▮</span>
+            <div class="update-banner-text">
+              <span class="update-banner-title">no system tray detected</span>
+              <span class="update-banner-meta">
+                common on vanilla GNOME. capscr keeps running in the
+                background: global hotkeys still work, right-click the capscr
+                entry in Activities for capture actions, and launching capscr
+                again reopens this window. for a tray icon, install the
+                AppIndicator extension.
+              </span>
+            </div>
+            <button
+              type="button"
+              class="btn"
+              data-size="xs"
+              onClick={() =>
+                void openUrl("https://extensions.gnome.org/extension/615/appindicator-support/")
+              }
+            >
+              get extension
+            </button>
+            <button
+              type="button"
+              class="btn"
+              data-variant="ghost"
+              data-size="xs"
+              onClick={() => {
+                setTrayMissing(false);
+                void api.dismissTrayHint();
+              }}
+            >
+              don't show again
+            </button>
+          </div>
+        </Show>
+
         <Show when={updateInfo() && !updateDismissed()}>
           <div class="update-banner">
             <span class="update-banner-glyph">▮</span>

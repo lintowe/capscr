@@ -185,6 +185,37 @@ fn main() {
                 });
             }
             build_tray(app)?;
+            // on a tray-less desktop (vanilla gnome has no StatusNotifier
+            // host) the tray icon silently never appears, stranding a
+            // tray-first app. detect that and surface the hub with a one-time
+            // banner so capscr stays reachable. the check is delayed and
+            // repeated because gnome extensions register their host late in
+            // the session.
+            #[cfg(target_os = "linux")]
+            {
+                let handle = app.handle().clone();
+                let dismissed = {
+                    let st = app.state::<state::AppState>();
+                    let cfg = st.config.lock().unwrap();
+                    cfg.ui.tray_hint_dismissed
+                };
+                if !dismissed {
+                    std::thread::spawn(move || {
+                        for wait in [3u64, 12] {
+                            std::thread::sleep(Duration::from_secs(wait));
+                            if crate::shell::tray_detect::status_notifier_present() {
+                                return;
+                            }
+                        }
+                        tracing::info!("no status-notifier tray host; surfacing the hub");
+                        let handle2 = handle.clone();
+                        let _ = handle.run_on_main_thread(move || {
+                            let _ = commands::open_hub_window(&handle2);
+                            let _ = handle2.emit("capscr://tray-missing", ());
+                        });
+                    });
+                }
+            }
             sync_autostart(app, autostart_desired);
             // jump-list registration does synchronous COM (CoCreateInstance per
             // task) — push it off the setup/UI thread so the hub WebView2
@@ -280,6 +311,7 @@ fn main() {
             commands::portal_rebind_shortcuts,
             commands::pin_manual_drag,
             commands::pin_set_position,
+            commands::dismiss_tray_hint,
             commands::set_hotkeys_disabled,
             commands::start_hotkey_capture,
             commands::cancel_hotkey_capture,

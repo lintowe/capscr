@@ -448,6 +448,10 @@ pub struct UiConfig {
     pub check_updates_on_launch: bool,
     #[serde(default = "default_true")]
     pub save_clipboard_to_history: bool,
+    // set once the user dismisses the "no system tray" first-run banner, so
+    // it never nags again on tray-less desktops (vanilla gnome)
+    #[serde(default)]
+    pub tray_hint_dismissed: bool,
 }
 
 fn default_true() -> bool {
@@ -467,6 +471,7 @@ impl Default for UiConfig {
             auto_start: false,
             check_updates_on_launch: true,
             save_clipboard_to_history: true,
+            tray_hint_dismissed: false,
         }
     }
 }

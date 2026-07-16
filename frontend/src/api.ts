@@ -280,6 +280,7 @@ export const api = {
   pinManualDrag: () => invoke<boolean>("pin_manual_drag"),
   pinSetPosition: (label: string, x: number, y: number) =>
     invoke<void>("pin_set_position", { label, x, y }),
+  dismissTrayHint: () => invoke<void>("dismiss_tray_hint"),
   setHotkeysDisabled: (disabled: boolean) =>
     invoke<void>("set_hotkeys_disabled", { disabled }),
   startHotkeyCapture: () => invoke<void>("start_hotkey_capture"),

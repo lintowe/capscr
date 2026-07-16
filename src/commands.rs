@@ -3232,6 +3232,18 @@ pub fn record_hotkey_status(
     let _ = app.emit("capscr://hotkey-status", ());
 }
 
+// persist the "no system tray" banner dismissal so it never reappears
+#[tauri::command]
+pub fn dismiss_tray_hint(app: AppHandle, state: State<AppState>) -> Result<(), String> {
+    {
+        let mut cfg = state.config.lock().unwrap();
+        cfg.ui.tray_hint_dismissed = true;
+        cfg.save().map_err(|e| e.to_string())?;
+    }
+    let _ = app.emit("capscr://config-updated", ());
+    Ok(())
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct EvdevStatus {
     pub enabled: bool,
