@@ -121,6 +121,14 @@ fn normalize_button(code: u16) -> Option<u16> {
     }
 }
 
+fn binding_fires_on_edge(code: u16, value: i32) -> bool {
+    if normalize_button(code).is_some() {
+        value == 0
+    } else {
+        value == 1
+    }
+}
+
 pub fn parse_evdev_binding(s: &str) -> Option<(u8, u16)> {
     let mut mods = 0u8;
     let mut code = None;
@@ -357,7 +365,7 @@ fn read_device(path: PathBuf, app: AppHandle) {
             continue;
         }
 
-        if value == 1 {
+        if binding_fires_on_edge(code, value) {
             dispatch(&app, normalize_button(code).unwrap_or(code), &mut last_fire);
         }
     }
@@ -439,6 +447,20 @@ mod tests {
         assert_eq!(normalize_button(BTN_BACK), Some(BTN_SIDE));
         assert_eq!(normalize_button(BTN_EXTRA), Some(BTN_EXTRA));
         assert_eq!(normalize_button(BTN_FORWARD), Some(BTN_EXTRA));
+    }
+
+    #[test]
+    fn fires_mouse_bindings_on_release() {
+        assert!(!binding_fires_on_edge(BTN_SIDE, 1));
+        assert!(binding_fires_on_edge(BTN_SIDE, 0));
+        assert!(!binding_fires_on_edge(BTN_BACK, 1));
+        assert!(binding_fires_on_edge(BTN_BACK, 0));
+    }
+
+    #[test]
+    fn fires_keyboard_bindings_on_press() {
+        assert!(binding_fires_on_edge(99, 1));
+        assert!(!binding_fires_on_edge(99, 0));
     }
 
     #[test]
