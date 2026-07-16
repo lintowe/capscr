@@ -4,6 +4,8 @@ mod capture;
 mod clipboard;
 mod commands;
 mod config;
+#[cfg(target_os = "linux")]
+mod distro;
 mod hotkeys;
 #[cfg(windows)]
 mod jumplist;

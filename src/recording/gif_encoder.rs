@@ -787,6 +787,15 @@ impl Drop for GifRecorder {
 }
 
 pub fn find_ffmpeg() -> std::path::PathBuf {
+    // on linux a distro-installed ffmpeg on PATH wins over any copy capscr
+    // downloaded, so a later `apt/dnf install ffmpeg` takes over and stays
+    // security-updated. on windows there is no system ffmpeg, so the bundled
+    // and downloaded copies come first.
+    #[cfg(target_os = "linux")]
+    if system_ffmpeg_runnable() {
+        return std::path::PathBuf::from("ffmpeg");
+    }
+
     if let Ok(exe_path) = std::env::current_exe() {
         if let Some(parent) = exe_path.parent() {
             let local_ffmpeg = parent.join("ffmpeg.exe");
@@ -812,6 +821,20 @@ pub fn find_ffmpeg() -> std::path::PathBuf {
     }
 
     std::path::PathBuf::from("ffmpeg")
+}
+
+// probe the literal `ffmpeg` on PATH directly (not through ffmpeg_command,
+// which would recurse into find_ffmpeg)
+#[cfg(target_os = "linux")]
+fn system_ffmpeg_runnable() -> bool {
+    std::process::Command::new("ffmpeg")
+        .arg("-version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .and_then(|mut child| child.wait())
+        .map(|status| status.success())
+        .unwrap_or(false)
 }
 
 pub fn is_ffmpeg_available() -> bool {

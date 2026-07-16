@@ -529,6 +529,12 @@ function Hub() {
               <span class="update-banner-meta">
                 you're on v{updateInfo()!.current_version}
               </span>
+              <Show when={updateInfo()!.notes}>
+                <details class="update-notes">
+                  <summary>what's new</summary>
+                  <pre class="update-notes-body">{updateInfo()!.notes}</pre>
+                </details>
+              </Show>
             </div>
             <Show
               when={updateInfo()!.install_kind === "in-place"}
@@ -537,10 +543,23 @@ function Hub() {
                   type="button"
                   class="btn"
                   data-size="xs"
-                  onClick={() => void openUrl(RELEASES_URL)}
+                  onClick={() =>
+                    void openUrl(updateInfo()!.download_url ?? RELEASES_URL)
+                  }
+                  title={
+                    updateInfo()!.install_kind === "deb"
+                      ? "then: sudo apt install ./the-downloaded.deb"
+                      : updateInfo()!.install_kind === "rpm"
+                        ? "then: sudo dnf install ./the-downloaded.rpm"
+                        : undefined
+                  }
                 >
                   <Download size={11} stroke-width={1.5} />
-                  get release
+                  {updateInfo()!.install_kind === "deb"
+                    ? "download .deb"
+                    : updateInfo()!.install_kind === "rpm"
+                      ? "download .rpm"
+                      : "get release"}
                 </button>
               }
             >

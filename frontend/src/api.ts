@@ -181,7 +181,9 @@ export interface UpdateInfo {
   version: string;
   current_version: string;
   notes: string | null;
-  install_kind: "in-place" | "external";
+  install_kind: "in-place" | "external" | "deb" | "rpm";
+  // for deb/rpm: direct link to the matching release asset
+  download_url?: string;
 }
 
 export interface HotkeyStatusEntry {

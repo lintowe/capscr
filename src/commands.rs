@@ -1606,24 +1606,66 @@ pub struct UpdateInfo {
     pub version: String,
     pub current_version: String,
     pub notes: Option<String>,
-    pub install_kind: &'static str,
+    // "in-place" | "deb" | "rpm" | "external"
+    pub install_kind: String,
+    // for deb/rpm: a direct link to the matching release asset, so the UI
+    // can offer "download .deb" instead of a bare error
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub download_url: Option<String>,
 }
 
-// the linux updater can only swap a running AppImage; deb/rpm/plain-binary
-// installs must fetch the release themselves
-fn update_install_kind() -> &'static str {
+// the linux updater can only swap a running AppImage; deb/rpm installs are
+// owned by the package manager and windows/macos self-update in place
+fn update_install_kind() -> String {
     #[cfg(target_os = "linux")]
     {
-        if std::env::var_os("APPIMAGE").is_some() {
-            "in-place"
-        } else {
-            "external"
-        }
+        crate::distro::detect().as_str().to_string()
     }
     #[cfg(not(target_os = "linux"))]
     {
-        "in-place"
+        "in-place".to_string()
     }
+}
+
+// look up the release asset URL matching this install's package format.
+// tries the github release API first (exact filenames), then falls back to
+// the predictable asset name, then None (the UI drops back to the releases
+// page)
+#[cfg(target_os = "linux")]
+async fn matching_asset_url(version: &str, kind: &str) -> Option<String> {
+    let suffix = match kind {
+        "deb" => ".deb",
+        "rpm" => ".rpm",
+        _ => return None,
+    };
+    let tag = format!("v{version}");
+    let api = format!("https://api.github.com/repos/zeo/capscr/releases/tags/{tag}");
+    let found = async {
+        let client = reqwest::Client::builder()
+            .user_agent("capscr-updater")
+            .build()
+            .ok()?;
+        let text = client.get(&api).send().await.ok()?.text().await.ok()?;
+        let body: serde_json::Value = serde_json::from_str(&text).ok()?;
+        body.get("assets")?
+            .as_array()?
+            .iter()
+            .filter_map(|a| a.get("browser_download_url")?.as_str())
+            .find(|url| url.ends_with(suffix))
+            .map(str::to_string)
+    }
+    .await;
+    found.or_else(|| {
+        // predictable names from the bundler (README install table)
+        let name = match kind {
+            "deb" => format!("capscr_{version}_amd64.deb"),
+            "rpm" => format!("capscr-{version}-1.x86_64.rpm"),
+            _ => return None,
+        };
+        Some(format!(
+            "https://github.com/zeo/capscr/releases/download/{tag}/{name}"
+        ))
+    })
 }
 
 #[tauri::command]
@@ -1631,19 +1673,30 @@ pub async fn check_for_updates(app: AppHandle) -> Result<Option<UpdateInfo>, Str
     use tauri_plugin_updater::UpdaterExt;
     let updater = app.updater().map_err(|e| e.to_string())?;
     let update = updater.check().await.map_err(|e| e.to_string())?;
-    Ok(update.map(|u| UpdateInfo {
+    let Some(u) = update else {
+        return Ok(None);
+    };
+    let kind = update_install_kind();
+    #[cfg(target_os = "linux")]
+    let download_url = matching_asset_url(&u.version.to_string(), &kind).await;
+    #[cfg(not(target_os = "linux"))]
+    let download_url = None;
+    Ok(Some(UpdateInfo {
         version: u.version.to_string(),
         current_version: u.current_version.to_string(),
         notes: u.body.clone(),
-        install_kind: update_install_kind(),
+        install_kind: kind,
+        download_url,
     }))
 }
 
 #[tauri::command]
 pub async fn install_update(app: AppHandle) -> Result<(), String> {
     use tauri_plugin_updater::UpdaterExt;
-    if update_install_kind() == "external" {
-        return Err("this install can't self-update; download the new release instead".into());
+    if update_install_kind() != "in-place" {
+        return Err("this install updates through your package manager; \
+                    download the new release instead"
+            .into());
     }
     let updater = app.updater().map_err(|e| e.to_string())?;
     let update = updater
@@ -2132,51 +2185,62 @@ pub fn run_task(task: &CaptureTask, app: &AppHandle) -> anyhow::Result<()> {
     run_capture_pipeline_with_target(mode, post, app, task.target_destination, task.delay_ms)
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "linux"))]
 use std::sync::atomic::{AtomicBool, Ordering};
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "linux"))]
 static FFMPEG_DOWNLOADING: AtomicBool = AtomicBool::new(false);
 
-#[cfg(windows)]
-fn perform_ffmpeg_download() -> anyhow::Result<()> {
-    const FFMPEG_BIN_NAME: &str = "ffmpeg.exe";
+// a repacked static ffmpeg for linux, hosted on the same origin capscr
+// already trusts for the marketplace registry, pinned to a sha256 that ships
+// in this build. LINUX_FFMPEG_SHA256 stays empty until a build is uploaded;
+// while empty the download offer is hidden and users get package-manager
+// instructions (a distro ffmpeg is preferred anyway). fill both together per
+// release.
+#[cfg(target_os = "linux")]
+const LINUX_FFMPEG_URL: &str = "https://rot.lt/capscr/ffmpeg/ffmpeg-linux-x64.zip";
+#[cfg(target_os = "linux")]
+const LINUX_FFMPEG_SHA256: &str = "";
 
+// download a zip over TLS, verify it against an expected sha256, extract the
+// ffmpeg binary into data_dir, and mark it executable. shared by the windows
+// (gyan.dev, sidecar hash) and linux (rot.lt, embedded hash) paths.
+#[cfg(any(windows, target_os = "linux"))]
+fn download_verified_ffmpeg(url: &str, expected_sha256: &str, bin_name: &str) -> anyhow::Result<()> {
     let proj_dirs = directories::ProjectDirs::from("com", "capscr", "capscr")
         .ok_or_else(|| anyhow::anyhow!("failed to locate app data directory"))?;
     let data_dir = proj_dirs.data_dir();
     std::fs::create_dir_all(data_dir)?;
-    let dest_path = data_dir.join(FFMPEG_BIN_NAME);
+    let dest_path = data_dir.join(bin_name);
 
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(300))
         .build()?;
-
-    let url = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip";
     let resp = client.get(url).send()?;
     if !resp.status().is_success() {
         return Err(anyhow::anyhow!("http error: {}", resp.status()));
     }
-
     let zip_bytes = resp.bytes()?;
 
-    // verify the payload against the vendor's published sha256 sidecar before
-    // trusting a binary we're about to write and later execute. this closes the
-    // no-integrity-check gap: a truncated, corrupted, or zip-only-tampered
-    // download is rejected instead of run. (it can't by itself defend a fully
-    // compromised host that serves a matching hash, but it is fetched over the
-    // same TLS channel and fails closed.)
-    let expected = client
-        .get(format!("{url}.sha256"))
-        .send()?
-        .error_for_status()?
-        .text()?
-        .split_whitespace()
-        .next()
-        .unwrap_or_default()
-        .to_lowercase();
+    // the payload is verified against a sha256 before we write and later
+    // execute it, so a truncated, corrupted, or mirror-tampered download is
+    // rejected. windows resolves the expected hash from the vendor's sidecar;
+    // linux pins it in the binary, which makes the mirror untrusted storage.
+    let expected = if expected_sha256.is_empty() {
+        client
+            .get(format!("{url}.sha256"))
+            .send()?
+            .error_for_status()?
+            .text()?
+            .split_whitespace()
+            .next()
+            .unwrap_or_default()
+            .to_lowercase()
+    } else {
+        expected_sha256.to_lowercase()
+    };
     if expected.len() != 64 || !expected.chars().all(|c| c.is_ascii_hexdigit()) {
         return Err(anyhow::anyhow!(
-            "ffmpeg checksum sidecar missing or malformed; refusing to install unverified binary"
+            "ffmpeg checksum missing or malformed; refusing to install unverified binary"
         ));
     }
     let got = hex::encode(<sha2::Sha256 as sha2::Digest>::digest(zip_bytes.as_ref()));
@@ -2187,15 +2251,16 @@ fn perform_ffmpeg_download() -> anyhow::Result<()> {
     }
 
     let mut archive = zip::ZipArchive::new(std::io::Cursor::new(zip_bytes.as_ref()))?;
-    let mut found = false;
-
     for i in 0..archive.len() {
         let mut file = archive.by_index(i)?;
         let name = file.name();
-        if name.ends_with("bin/ffmpeg.exe") || name.ends_with("bin/ffmpeg") {
+        if name.ends_with("bin/ffmpeg.exe")
+            || name.ends_with("bin/ffmpeg")
+            || name.ends_with("/ffmpeg")
+            || name == "ffmpeg"
+        {
             let mut out_file = std::fs::File::create(&dest_path)?;
             std::io::copy(&mut file, &mut out_file)?;
-
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
@@ -2203,34 +2268,92 @@ fn perform_ffmpeg_download() -> anyhow::Result<()> {
                 perms.set_mode(0o755);
                 std::fs::set_permissions(&dest_path, perms)?;
             }
-
-            found = true;
-            break;
+            return Ok(());
         }
     }
-
-    if !found {
-        return Err(anyhow::anyhow!("ffmpeg binary not found in zip archive"));
-    }
-
-    Ok(())
+    Err(anyhow::anyhow!("ffmpeg binary not found in zip archive"))
 }
 
-// the auto-download serves a windows build (gyan.dev); on linux ffmpeg is a
-// package-manager install away and stays security-updated there
-#[cfg(not(windows))]
+#[cfg(windows)]
+fn perform_ffmpeg_download() -> anyhow::Result<()> {
+    download_verified_ffmpeg(
+        "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip",
+        "",
+        "ffmpeg.exe",
+    )
+}
+
+// linux prefers a distro ffmpeg (find_ffmpeg checks PATH first and the
+// packages list it as a recommend), so this only fires for an AppImage on a
+// minimal system. offer the verified download when a build is pinned,
+// otherwise fall back to package-manager instructions.
+#[cfg(target_os = "linux")]
 fn handle_missing_ffmpeg(app: &AppHandle) -> anyhow::Result<()> {
     use tauri_plugin_dialog::DialogExt;
-    app.dialog()
+    let instructions = "Recording MP4 requires FFmpeg, which was not found on your system.\n\n\
+         Install it with your package manager, e.g.\n\
+         sudo apt install ffmpeg   (Debian/Ubuntu)\n\
+         sudo dnf install ffmpeg   (Fedora)";
+
+    if LINUX_FFMPEG_SHA256.is_empty() {
+        app.dialog()
+            .message(instructions)
+            .title("FFmpeg Required")
+            .kind(tauri_plugin_dialog::MessageDialogKind::Info)
+            .blocking_show();
+        return Ok(());
+    }
+    if FFMPEG_DOWNLOADING.load(Ordering::SeqCst) {
+        let _ = show_notification(
+            "FFmpeg Download",
+            "FFmpeg is already downloading in the background. Please wait.",
+        );
+        return Ok(());
+    }
+    let download = app
+        .dialog()
         .message(
             "Recording MP4 requires FFmpeg, which was not found on your system.\n\n\
-             Install it with your package manager, e.g.\n\
-             sudo apt install ffmpeg   (Debian/Ubuntu)\n\
-             sudo dnf install ffmpeg   (Fedora)",
+             Download a verified static FFmpeg (~30 MB, used only by capscr), or \
+             install it with your package manager instead?",
         )
         .title("FFmpeg Required")
         .kind(tauri_plugin_dialog::MessageDialogKind::Info)
+        .buttons(tauri_plugin_dialog::MessageDialogButtons::OkCancelCustom(
+            "Download".into(),
+            "Show instructions".into(),
+        ))
         .blocking_show();
+    if !download {
+        app.dialog()
+            .message(instructions)
+            .title("Install FFmpeg")
+            .kind(tauri_plugin_dialog::MessageDialogKind::Info)
+            .blocking_show();
+        return Ok(());
+    }
+    FFMPEG_DOWNLOADING.store(true, Ordering::SeqCst);
+    std::thread::spawn(move || {
+        let _ = show_notification("FFmpeg Download", "Downloading a verified FFmpeg build...");
+        match download_verified_ffmpeg(LINUX_FFMPEG_URL, LINUX_FFMPEG_SHA256, "ffmpeg") {
+            Ok(()) => {
+                let _ = show_notification(
+                    "FFmpeg Configured",
+                    "FFmpeg is ready. You can now record MP4 videos.",
+                );
+            }
+            Err(e) => {
+                tracing::error!("failed to download ffmpeg: {e}");
+                let _ = show_notification("FFmpeg Download Failed", &format!("{e}"));
+            }
+        }
+        FFMPEG_DOWNLOADING.store(false, Ordering::SeqCst);
+    });
+    Ok(())
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
+fn handle_missing_ffmpeg(_app: &AppHandle) -> anyhow::Result<()> {
     Ok(())
 }
 

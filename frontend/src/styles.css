@@ -1652,6 +1652,27 @@ kbd {
   font-size: 11px;
 }
 
+.update-notes {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-2);
+}
+
+.update-notes > summary {
+  cursor: pointer;
+  user-select: none;
+}
+
+.update-notes-body {
+  margin: 6px 0 0;
+  max-height: 180px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  font-family: inherit;
+  font-size: 11px;
+  color: var(--text-1);
+}
+
 /* ---------------- editor HDR banner ---------------- */
 
 .editor-hdr-banner {
