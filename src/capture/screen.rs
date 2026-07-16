@@ -97,71 +97,52 @@ impl ScreenCapture {
         let total_width = width_i32 as u32;
         let total_height = height_i32 as u32;
 
-        let mut combined = RgbaImage::new(total_width, total_height);
-
-        #[cfg(windows)]
-        {
-            // capture monitors concurrently when there's more than one: the GPU
-            // BitBlt readbacks overlap and the per-monitor work spreads across
-            // cores. SDR/GDI captures are independent; HDR captures serialise on
-            // HDR_CAPTURE_LOCK inside capture_one_monitor, and each worker forces
-            // par_convert serial (capture_serial) so the inner pixel conversions
-            // don't oversubscribe. a single monitor stays on the calling thread.
-            let captured: Vec<Option<RgbaImage>> = if monitors.len() > 1 {
-                std::thread::scope(|s| {
-                    let handles: Vec<_> = monitors
-                        .iter()
-                        .map(|m| {
-                            s.spawn(move || {
-                                super::capture_serial(|| super::capture_one_monitor(m).ok())
-                            })
-                        })
-                        .collect();
-                    handles
-                        .into_iter()
-                        .map(|h| h.join().unwrap_or(None))
-                        .collect()
-                })
-            } else {
-                vec![super::capture_one_monitor(&monitors[0]).ok()]
-            };
-
-            for (monitor, img) in monitors.iter().zip(captured) {
-                let Some(img) = img else {
-                    tracing::warn!(
-                        "capture_one_monitor failed for {}x{}+{}+{}",
-                        monitor.width,
-                        monitor.height,
-                        monitor.x,
-                        monitor.y,
-                    );
-                    continue;
-                };
-                let offset_x_i32 = monitor.x.saturating_sub(min_x);
-                let offset_y_i32 = monitor.y.saturating_sub(min_y);
-                if offset_x_i32 < 0 || offset_y_i32 < 0 {
-                    continue;
-                }
-                if let Err(e) = combined.copy_from(&img, offset_x_i32 as u32, offset_y_i32 as u32) {
-                    tracing::warn!("Failed to copy monitor image into combined buffer: {e}");
-                }
-            }
+        // when the portal is the only wayland source, its screenshot already
+        // covers the whole desktop: one call instead of n crops of the same
+        // shot, and one permission prompt instead of n on first run
+        #[cfg(target_os = "linux")]
+        if super::is_wayland_session() && super::wayland_chain::portal_only() {
+            return super::portal_whole_desktop();
         }
 
-        #[cfg(not(windows))]
-        for monitor in &monitors {
-            let img = match super::capture_one_monitor(monitor) {
-                Ok(i) => i,
-                Err(e) => {
-                    tracing::warn!(
-                        "capture_one_monitor failed for {}x{}+{}+{}: {e:#}",
-                        monitor.width,
-                        monitor.height,
-                        monitor.x,
-                        monitor.y,
-                    );
-                    continue;
-                }
+        let mut combined = RgbaImage::new(total_width, total_height);
+
+        // capture monitors concurrently when there's more than one: the
+        // per-monitor readbacks overlap and the work spreads across cores.
+        // windows HDR captures serialise on HDR_CAPTURE_LOCK inside
+        // capture_one_monitor, wayland's ext-copy session serialises on its
+        // own mutex, and each worker forces par_convert serial
+        // (capture_serial) so the inner pixel conversions don't
+        // oversubscribe. a single monitor stays on the calling thread.
+        let captured: Vec<Option<RgbaImage>> = if monitors.len() > 1 {
+            std::thread::scope(|s| {
+                let handles: Vec<_> = monitors
+                    .iter()
+                    .map(|m| {
+                        s.spawn(move || {
+                            super::capture_serial(|| super::capture_one_monitor(m).ok())
+                        })
+                    })
+                    .collect();
+                handles
+                    .into_iter()
+                    .map(|h| h.join().unwrap_or(None))
+                    .collect()
+            })
+        } else {
+            vec![super::capture_one_monitor(&monitors[0]).ok()]
+        };
+
+        for (monitor, img) in monitors.iter().zip(captured) {
+            let Some(img) = img else {
+                tracing::warn!(
+                    "capture_one_monitor failed for {}x{}+{}+{}",
+                    monitor.width,
+                    monitor.height,
+                    monitor.x,
+                    monitor.y,
+                );
+                continue;
             };
             let offset_x_i32 = monitor.x.saturating_sub(min_x);
             let offset_y_i32 = monitor.y.saturating_sub(min_y);

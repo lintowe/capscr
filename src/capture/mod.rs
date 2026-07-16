@@ -757,6 +757,13 @@ pub fn wayland_diagnostic() {
     }
 }
 
+// the portal screenshot covers the whole desktop already; all_monitors uses
+// this directly on portal-only sessions instead of stitching n crops of it
+#[cfg(target_os = "linux")]
+pub(crate) fn portal_whole_desktop() -> Result<RgbaImage> {
+    portal::portal_screenshot()
+}
+
 // portal screenshots cover the whole desktop; crop this monitor's rect out
 #[cfg(target_os = "linux")]
 fn portal_grab_monitor(monitor: &MonitorInfo) -> Result<RgbaImage> {

@@ -87,6 +87,11 @@ pub(crate) fn still_order() -> &'static [SourceKind] {
     })
 }
 
+// true when the chain has nothing better than one-shot portal screenshots
+pub(crate) fn portal_only() -> bool {
+    still_order() == [SourceKind::PortalScreenshot]
+}
+
 // persistent ext-image-copy session shared by the still paths; recreated once
 // on failure so a compositor restart doesn't wedge the source
 static EXT_STILL: Mutex<Option<ExtCopySession>> = Mutex::new(None);
