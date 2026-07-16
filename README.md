@@ -57,6 +57,8 @@ Both X11 and Wayland are supported. On Wayland the pixel source is chosen per co
 
 "Advanced input" is an opt-in in **hub → Settings → hotkeys** that reads `/dev/input` directly (needs membership in the `input` group); it powers mouse side-button hotkeys and keyboard hotkeys on Wayland compositors without the GlobalShortcuts portal. HDR-preserved capture is Windows-only: no Linux compositor exposes HDR pixels to a capture client yet (run `capscr --wayland-diag` for a per-output readout), so Linux captures are SDR. On a desktop with no system tray (vanilla GNOME), capscr opens its hub with guidance and stays reachable through global hotkeys, the desktop-file capture actions, and relaunching the app.
 
+The `—` cells above are platform boundaries, not missing features: they need changes in the compositor itself, not in capscr. Each one, why it exists, and what would close it is written up in [`docs/platform-limits.md`](docs/platform-limits.md).
+
 ## default hotkeys
 
 Configurable in **hub → Tasks**.
