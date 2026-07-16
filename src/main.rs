@@ -249,6 +249,7 @@ fn main() {
             commands::set_config,
             commands::take_screenshot,
             commands::list_captures,
+            commands::history_thumbnail,
             commands::delete_capture,
             commands::copy_capture_to_clipboard,
             commands::reupload_capture,

@@ -227,6 +227,7 @@ export const api = {
   takeScreenshot: (mode: CaptureMode, post: PostAction) =>
     invoke<void>("take_screenshot", { mode, post }),
   listCaptures: () => invoke<HistoryEntry[]>("list_captures"),
+  historyThumbnail: (path: string) => invoke<string>("history_thumbnail", { path }),
   deleteCapture: (path: string) => invoke<void>("delete_capture", { path }),
   copyCaptureToClipboard: (path: string) =>
     invoke<void>("copy_capture_to_clipboard", { path }),

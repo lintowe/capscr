@@ -23,9 +23,39 @@ import {
   Pin,
 } from "lucide-solid";
 import { api } from "../api";
+import { IS_LINUX } from "../keys";
 import { TrimModal } from "../components/TrimModal";
 
 type FilterKind = "all" | "images" | "gifs" | "videos" | "hdr";
+
+// linux captures can't produce hdr files, so the pill would always be empty
+const FILTER_PILLS: readonly FilterKind[] = (
+  ["all", "images", "gifs", "videos", "hdr"] as FilterKind[]
+).filter((kind) => !(IS_LINUX && kind === "hdr"));
+
+// grid tiles use a cached backend thumbnail: full-size animated gifs in
+// <img> decode to gigabytes across a grid, and files outside the asset
+// scope render blank
+function ThumbImg(props: { path: string; alt: string }) {
+  const [thumb] = createResource(
+    () => props.path,
+    (path) => api.historyThumbnail(path).catch(() => null),
+  );
+  return (
+    <Show when={thumb()} fallback={<div class="tile-img" />}>
+      <img
+        class="tile-img"
+        src={convertFileSrc(thumb()!)}
+        alt={props.alt}
+        loading="lazy"
+        decoding="async"
+        onError={(ev) => {
+          (ev.currentTarget as HTMLImageElement).style.opacity = "0.3";
+        }}
+      />
+    </Show>
+  );
+}
 
 function formatBytes(b: number): string {
   if (b < 1024) return `${b} B`;
@@ -214,7 +244,7 @@ export function History() {
             </Show>
           </label>
           <div class="history-filters">
-            <For each={["all", "images", "gifs", "videos", "hdr"] as const}>
+            <For each={FILTER_PILLS}>
               {(k) => (
                 <button
                   type="button"
@@ -301,19 +331,7 @@ export function History() {
               >
                 <Show
                   when={e.is_mp4}
-                  fallback={
-                    <img
-                      class="tile-img"
-                      src={convertFileSrc(e.path)}
-                      alt={e.filename}
-                      loading="lazy"
-                      decoding="async"
-                      onError={(ev) => {
-                        (ev.currentTarget as HTMLImageElement).style.opacity =
-                          "0.3";
-                      }}
-                    />
-                  }
+                  fallback={<ThumbImg path={e.path} alt={e.filename} />}
                 >
                   <video
                     class="tile-img"

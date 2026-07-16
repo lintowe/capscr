@@ -1092,6 +1092,9 @@ button.btn,
   gap: 10px;
   flex: 1;
   min-width: 0;
+  /* narrow hub widths: pills drop to the next line instead of sliding
+     under the reload button */
+  flex-wrap: wrap;
 }
 
 .history-search {
@@ -1137,6 +1140,7 @@ button.btn,
 .history-filters {
   display: inline-flex;
   gap: 4px;
+  flex-wrap: wrap;
 }
 
 .filter-pill {
