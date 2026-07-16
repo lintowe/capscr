@@ -373,9 +373,18 @@ fn run_capture_pipeline_inner(
             match crate::capture::capture_wayland_window(include_cursor) {
                 Ok(image) => Some(image),
                 Err(error) if format!("{error:#}").contains("Cancelled") => return Ok(()),
-                // gnome offers no window list to ordinary apps; its own
-                // picker through the portal's interactive mode is the only
-                // sanctioned window-pick there
+                // with the companion extension the capscr selector picks
+                // windows on gnome too; fall through to it like on kde/x11
+                Err(_)
+                    if crate::shell::desktop() == crate::shell::DesktopEnv::Gnome
+                        && crate::capture::gnome_shell::available() =>
+                {
+                    tracing::debug!("using the capscr selector via the companion extension");
+                    None
+                }
+                // gnome without the companion offers no window list to
+                // ordinary apps; its own picker through the portal's
+                // interactive mode is the only sanctioned window-pick there
                 Err(_) if crate::shell::desktop() == crate::shell::DesktopEnv::Gnome => {
                     match crate::capture::portal_screenshot_interactive() {
                         Ok(image) => Some(image),
@@ -3409,6 +3418,85 @@ pub fn evdev_status() -> EvdevStatus {
     }
 }
 
+#[derive(Serialize)]
+pub struct GnomeCompanionStatus {
+    pub on_gnome: bool,
+    // the extension answers on the bus (installed, enabled, session current)
+    pub active: bool,
+    // files are on disk; inactive means a re-login (or enable) is pending
+    pub installed: bool,
+}
+
+#[cfg(target_os = "linux")]
+const GNOME_EXTENSION_UUID: &str = "capscr@rot.lt";
+
+#[cfg(target_os = "linux")]
+fn gnome_extension_dir() -> Option<std::path::PathBuf> {
+    Some(
+        directories::BaseDirs::new()?
+            .data_dir()
+            .join("gnome-shell/extensions")
+            .join(GNOME_EXTENSION_UUID),
+    )
+}
+
+// settings backing for the gnome section: install state of the companion
+// shell extension that supplies the window picker, keep-above, and the
+// panel indicator on gnome
+#[tauri::command]
+pub fn gnome_companion_status() -> GnomeCompanionStatus {
+    #[cfg(target_os = "linux")]
+    {
+        GnomeCompanionStatus {
+            on_gnome: crate::shell::desktop() == crate::shell::DesktopEnv::Gnome,
+            active: crate::capture::gnome_shell::available(),
+            installed: gnome_extension_dir()
+                .is_some_and(|dir| dir.join("extension.js").exists()),
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        GnomeCompanionStatus {
+            on_gnome: false,
+            active: false,
+            installed: false,
+        }
+    }
+}
+
+// copy the bundled extension into the user's gnome-shell extensions dir and
+// flag it enabled; gnome-shell only scans that dir at session start, so the
+// caller tells the user to log out and back in when active stays false
+#[tauri::command]
+pub fn install_gnome_companion(app: AppHandle) -> Result<GnomeCompanionStatus, String> {
+    #[cfg(target_os = "linux")]
+    {
+        use tauri::path::BaseDirectory;
+        let target = gnome_extension_dir().ok_or("no home directory")?;
+        std::fs::create_dir_all(&target).map_err(|e| e.to_string())?;
+        for file in ["extension.js", "metadata.json"] {
+            let bundled = app
+                .path()
+                .resolve(format!("gnome-extension/{file}"), BaseDirectory::Resource)
+                .map_err(|e| e.to_string())?;
+            std::fs::copy(&bundled, target.join(file)).map_err(|e| {
+                format!("copying {} failed: {e}", bundled.display())
+            })?;
+        }
+        // records the enabled flag against the freshly copied files; the
+        // running shell picks it up at the next login
+        let _ = std::process::Command::new("gnome-extensions")
+            .args(["enable", GNOME_EXTENSION_UUID])
+            .status();
+        Ok(gnome_companion_status())
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = app;
+        Err("the companion extension only exists on Linux".to_string())
+    }
+}
+
 // re-run the portal bind for the current set even when unchanged, so a user
 // who dismissed the desktop's approval dialog can bring it back
 #[tauri::command]
@@ -4044,11 +4132,24 @@ pub async fn pin_image(
 
     // always_on_top is a no-op on wayland; keep the pin above other windows
     // via a compositor role. kde uses kwin scripting (keeps the pin a normal
-    // draggable toplevel); wlroots compositors use layer-shell, which has no
-    // compositor-driven move, so those pins drag through pin_set_position.
+    // draggable toplevel); gnome goes through the companion extension, which
+    // also cascades the pin since mutter ignores client positioning; wlroots
+    // compositors use layer-shell, which has no compositor-driven move, so
+    // those pins drag through pin_set_position.
     #[cfg(target_os = "linux")]
     if crate::capture::gui_is_wayland() {
-        if crate::shell::wayland_globals().plasma_shell {
+        if !crate::shell::wayland_globals().plasma_shell
+            && crate::capture::gnome_shell::available()
+        {
+            let index = state.pinned_images.lock().unwrap().len().saturating_sub(1);
+            let base = 48 + (index as i32 % 6) * 36;
+            std::thread::spawn(move || {
+                // the extension queues the placement if the pin hasn't mapped
+                if let Err(e) = crate::capture::gnome_shell::place_above("capscr — pinned", base, base) {
+                    tracing::debug!("companion pin keep-above unavailable: {e:#}");
+                }
+            });
+        } else if crate::shell::wayland_globals().plasma_shell {
             std::thread::spawn(|| {
                 for _ in 0..10 {
                     std::thread::sleep(Duration::from_millis(300));

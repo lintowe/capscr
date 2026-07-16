@@ -180,6 +180,7 @@ function GeneralPane(props: { c: AppConfig; patch: Patch }) {
     }
   };
   return (
+    <>
     <Section title="output">
       <div class="field">
         <label class="field-label">directory</label>
@@ -268,6 +269,76 @@ function GeneralPane(props: { c: AppConfig; patch: Patch }) {
         </div>
       </div>
     </Section>
+    <Show when={IS_LINUX}>
+      <GnomeCompanionSection />
+    </Show>
+    </>
+  );
+}
+
+// gnome withholds the window list, keep-above, and the tray from ordinary
+// apps; the bundled shell extension restores all three. only rendered on a
+// gnome session.
+function GnomeCompanionSection() {
+  const [status, { refetch }] = createResource(api.gnomeCompanionStatus);
+  const [installing, setInstalling] = createSignal(false);
+  const [err, setErr] = createSignal<string | null>(null);
+
+  const install = async () => {
+    setInstalling(true);
+    setErr(null);
+    try {
+      await api.installGnomeCompanion();
+      await refetch();
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setInstalling(false);
+    }
+  };
+
+  return (
+    <Show when={status()?.on_gnome}>
+      <Section title="gnome integration">
+        <div class="field">
+          <label class="field-label">companion extension</label>
+          <div class="field-control">
+            <Switch>
+              <Match when={status()?.active}>
+                <span class="field-hint">
+                  active — window picking, pins above fullscreen, and the
+                  top-bar capture menu are handled by the shell extension
+                </span>
+              </Match>
+              <Match when={status()?.installed}>
+                <span class="field-hint">
+                  installed — log out and back in to activate it
+                </span>
+              </Match>
+              <Match when={true}>
+                <div class="input-row">
+                  <button
+                    class="btn"
+                    data-variant="ghost"
+                    disabled={installing()}
+                    onClick={install}
+                  >
+                    {installing() ? "installing…" : "install"}
+                  </button>
+                </div>
+                <span class="field-hint">
+                  without it, window capture uses gnome's own picker dialog,
+                  and pinned screenshots can't stay above fullscreen windows
+                </span>
+              </Match>
+            </Switch>
+            <Show when={err()}>
+              <p class="flash" data-tone="warn">{err()}</p>
+            </Show>
+          </div>
+        </div>
+      </Section>
+    </Show>
   );
 }
 

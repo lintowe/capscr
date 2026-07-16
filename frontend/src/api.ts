@@ -200,6 +200,12 @@ export interface EvdevStatus {
   dev_input_exists: boolean;
 }
 
+export interface GnomeCompanionStatus {
+  on_gnome: boolean;
+  active: boolean;
+  installed: boolean;
+}
+
 export interface HotkeyDiagnostics {
   disabled_globally: boolean;
   // which mechanism owns keyboard hotkeys: ll_hook | x11 | portal | evdev | none
@@ -278,6 +284,8 @@ export const api = {
     invoke<void>("toggle_plugin_enabled", { id, enabled }),
   hotkeyDiagnostics: () => invoke<HotkeyDiagnostics>("hotkey_diagnostics"),
   evdevStatus: () => invoke<EvdevStatus>("evdev_status"),
+  gnomeCompanionStatus: () => invoke<GnomeCompanionStatus>("gnome_companion_status"),
+  installGnomeCompanion: () => invoke<GnomeCompanionStatus>("install_gnome_companion"),
   portalRebindShortcuts: () => invoke<void>("portal_rebind_shortcuts"),
   pinManualDrag: () => invoke<boolean>("pin_manual_drag"),
   pinMoveBy: (label: string, dx: number, dy: number) =>

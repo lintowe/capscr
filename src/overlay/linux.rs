@@ -87,6 +87,27 @@ fn enumerate_windows() -> Vec<WindowRect> {
             }
             Err(error) => tracing::debug!("KWin window list unavailable: {error:#}"),
         }
+        // mutter tells ordinary clients nothing, but the companion extension
+        // answers with the same global-rect, topmost-first shape
+        if crate::capture::gnome_shell::available() {
+            match crate::capture::gnome_shell::list_windows() {
+                Ok(windows) => {
+                    return windows
+                        .into_iter()
+                        .enumerate()
+                        .map(|(index, window)| WindowRect {
+                            id: index as u32,
+                            handle: Some(format!("gnome:{}", window.id)),
+                            x: window.x,
+                            y: window.y,
+                            width: window.width,
+                            height: window.height,
+                        })
+                        .collect();
+                }
+                Err(error) => tracing::debug!("companion window list unavailable: {error:#}"),
+            }
+        }
     }
     let own_pid = std::process::id();
     let Ok(windows) = xcap::Window::all() else {

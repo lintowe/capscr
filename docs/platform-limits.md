@@ -32,27 +32,38 @@ seam in `src/capture/hdr.rs` (`is_hdr_at_point` / `capture_raw` /
 **closes when:** KWin or Mutter exposes HDR pixels to a capture client (e.g. a
 colour-managed `ext-image-copy-capture` frame).
 
-## GNOME window picking (portal picker, not capscr's overlay)
+## GNOME window picking (closed by the companion extension)
 
 On X11, KDE, and wlroots, clicking a window in capscr's own overlay picks it.
-On GNOME, Mutter gives ordinary apps no window list or per-window capture API,
-so window-mode capture routes through the screenshot portal's interactive
-mode: GNOME draws its own picker, capscr receives the chosen pixels. Same
-feature, GNOME's dialog instead of capscr's overlay.
+Mutter gives ordinary apps no window list or per-window capture API, so plain
+GNOME routes window-mode capture through the screenshot portal's interactive
+mode: GNOME draws its own picker, capscr receives the chosen pixels.
 
-**closes when:** Mutter offers a sanctioned window-enumeration or
-window-capture API to unsandboxed clients.
+The bundled companion extension (`linux/gnome-extension`, installable from
+Settings → general on a GNOME session) closes this: extension code runs
+inside the shell where the window list, stacking order, and window actors are
+all reachable, and it hands capscr the same window rects and per-window
+pixels KWin's ScreenShot2 provides. With it active, window mode uses capscr's
+own overlay exactly like everywhere else.
 
-## GNOME keep-above (recording bar / pinned screenshots)
+**closes without the extension when:** Mutter offers a sanctioned
+window-enumeration or window-capture API to unsandboxed clients.
+
+## GNOME keep-above (closed by the companion extension)
 
 The recording bar and pinned screenshots stay above other windows, including
 fullscreen ones, on X11 (always-on-top), KDE (plasma-shell / KWin scripting),
-and wlroots (layer-shell overlay). Mutter does not expose `wlr-layer-shell` to
-regular clients, so on GNOME these fall back to a normal window: visible, but
-not guaranteed above a fullscreen surface.
+and wlroots (layer-shell overlay). Mutter exposes no layer-shell to regular
+clients and ignores client positioning entirely, so on plain GNOME these fall
+back to a normal window: visible, but wherever Mutter puts it and not
+guaranteed above a fullscreen surface.
 
-**closes when:** Mutter supports layer-shell for applications (long-declined
-upstream).
+The companion extension closes this too: it sets keep-above (Mutter stacks
+those in a layer above fullscreen windows) and moves the bar and pins to the
+spots capscr asks for.
+
+**closes without the extension when:** Mutter supports layer-shell for
+applications (long-declined upstream).
 
 ## recording bar visible in an everything-covering recording (closed on Plasma 6.7+)
 
@@ -81,16 +92,18 @@ ScreenShot2 grabs by default, which would silently drop pinned screenshots
 from user captures — they are ordinary windows on Windows and belong in the
 shot. capscr passes `hide-caller-windows: false` and excludes only the bar.
 
-## GNOME system tray (needs an extension)
+## GNOME system tray (closed by the companion extension)
 
 capscr is tray-first. GNOME ships no StatusNotifier host by default, so the
-tray icon only appears if the user installs the AppIndicator extension.
-capscr detects the missing host at startup and surfaces its hub with a
-one-time explanation; global hotkeys, the desktop-file capture actions, and
-relaunching to reopen the hub all keep it reachable without a tray.
+tray icon only appears if the user installs the AppIndicator extension. The
+companion extension adds its own top-bar button carrying the capture menu, a
+native stand-in for the tray (deliberately not a bundled StatusNotifier host,
+which would fight the AppIndicator extension over the watcher name). Without
+either extension, capscr detects the missing host at startup and surfaces its
+hub with a one-time explanation; global hotkeys, the desktop-file capture
+actions, and relaunching to reopen the hub all keep it reachable.
 
-**closes when:** the session provides a StatusNotifier host (install the
-AppIndicator extension, or use a desktop that ships one).
+**closes without an extension when:** GNOME ships a StatusNotifier host.
 
 ## implementation differences that are NOT behaviour differences
 

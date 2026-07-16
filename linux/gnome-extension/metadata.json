@@ -1,0 +1,7 @@
+{
+  "uuid": "capscr@rot.lt",
+  "name": "capscr companion",
+  "description": "Gives capscr what GNOME withholds from ordinary apps: a window list with geometry and stacking for its own window picker, keep-above for the recording bar and pinned screenshots, and a top-bar capture menu standing in for the system tray.",
+  "shell-version": ["45", "46", "47", "48", "49", "50"],
+  "url": "https://github.com/zeo/capscr"
+}

@@ -755,8 +755,9 @@ pub mod linux_impl {
                         // windows); wlroots compositors use layer-shell on the
                         // overlay layer, which is above regular and fullscreen
                         // surfaces. either role must land before first map,
-                        // hence visible(false) above. gnome gets neither and
-                        // keeps the plain always_on_top window.
+                        // hence visible(false) above. gnome goes through the
+                        // companion extension when it's installed, and keeps
+                        // the plain always_on_top window otherwise.
                         if crate::capture::gui_is_wayland() {
                             match crate::overlay::plasma_ffi::pin_gtk_window(
                                 gtk_window.upcast_ref(),
@@ -783,7 +784,15 @@ pub mod linux_impl {
                                         )
                                     })
                                     .unwrap_or(false);
-                                    if !pinned {
+                                    let placed = pinned
+                                        || (crate::capture::gnome_shell::available()
+                                            && crate::capture::gnome_shell::place_above(
+                                                "capscr recording",
+                                                x as i32,
+                                                y as i32,
+                                            )
+                                            .is_ok());
+                                    if !placed {
                                         tracing::warn!(
                                             "recbar keep-above unavailable on this compositor; \
                                              the bar may sit behind a fullscreen window"

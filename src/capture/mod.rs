@@ -7,6 +7,8 @@ mod d2d_tonemap;
 mod color_probe;
 #[cfg(target_os = "linux")]
 mod ext_copy;
+#[cfg(target_os = "linux")]
+pub mod gnome_shell;
 #[cfg(windows)]
 mod gdi;
 mod hdr;
@@ -64,6 +66,7 @@ pub fn capture_wayland_area(x: i32, y: i32, width: u32, height: u32) -> Result<R
 pub use kwin::capture_interactive_window as capture_wayland_window;
 #[cfg(target_os = "linux")]
 pub use kwin::keep_own_windows_above;
+#[cfg(target_os = "linux")]
 pub use kwin::{exclude_own_windows_from_capture, CaptureExclusionGuard};
 
 #[cfg(target_os = "linux")]
@@ -148,9 +151,17 @@ pub(crate) fn compose_region(
     Ok(captured)
 }
 #[cfg(target_os = "linux")]
-pub use kwin::{
-    capture_window as capture_wayland_window_handle, list_windows as list_wayland_windows,
-};
+pub use kwin::list_windows as list_wayland_windows;
+
+// window-pick captures carry the compositor in the handle: kwin hands out
+// its own uuids, the gnome companion extension gets a "gnome:<id>" prefix
+#[cfg(target_os = "linux")]
+pub fn capture_wayland_window_handle(handle: &str, include_cursor: bool) -> Result<RgbaImage> {
+    match handle.strip_prefix("gnome:") {
+        Some(id) => gnome_shell::capture_window(id.parse()?),
+        None => kwin::capture_window(handle, include_cursor),
+    }
+}
 #[cfg(target_os = "linux")]
 pub(crate) use portal::portal_request;
 #[cfg(target_os = "linux")]

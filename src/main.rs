@@ -208,6 +208,11 @@ fn main() {
                             if crate::shell::tray_detect::status_notifier_present() {
                                 return;
                             }
+                            // the companion extension's panel button carries
+                            // the same menu, so the session isn't tray-less
+                            if capture::gnome_shell::available() {
+                                return;
+                            }
                         }
                         tracing::info!("no status-notifier tray host; surfacing the hub");
                         let handle2 = handle.clone();
@@ -310,6 +315,8 @@ fn main() {
             commands::upload_file,
             commands::hotkey_diagnostics,
             commands::evdev_status,
+            commands::gnome_companion_status,
+            commands::install_gnome_companion,
             commands::portal_rebind_shortcuts,
             commands::pin_manual_drag,
             commands::pin_move_by,
