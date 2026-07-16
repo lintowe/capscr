@@ -278,6 +278,8 @@ fn main() {
             commands::hotkey_diagnostics,
             commands::evdev_status,
             commands::portal_rebind_shortcuts,
+            commands::pin_manual_drag,
+            commands::pin_set_position,
             commands::set_hotkeys_disabled,
             commands::start_hotkey_capture,
             commands::cancel_hotkey_capture,

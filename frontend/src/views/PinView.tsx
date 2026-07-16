@@ -65,6 +65,41 @@ export function PinView(props: { label: string }) {
     getCurrentWindow().close();
   };
 
+  // on wlroots the pin is a layer-shell surface the compositor won't move, so
+  // data-tauri-drag-region does nothing; drive the move ourselves through
+  // pin_set_position. off (false) everywhere else, where the compositor drags.
+  const [manualDrag, setManualDrag] = createSignal(false);
+  onMount(() => {
+    api.pinManualDrag().then(setManualDrag).catch(() => {});
+  });
+
+  const startManualDrag = (ev: PointerEvent) => {
+    if (ev.button !== 0) return;
+    ev.preventDefault();
+    const originX = ev.screenX;
+    const originY = ev.screenY;
+    const win = getCurrentWindow();
+    let baseX = 0;
+    let baseY = 0;
+    win.outerPosition().then((pos) => {
+      baseX = pos.x;
+      baseY = pos.y;
+    });
+    const move = (m: PointerEvent) => {
+      api.pinSetPosition(
+        props.label,
+        Math.round(baseX + (m.screenX - originX)),
+        Math.round(baseY + (m.screenY - originY)),
+      ).catch(() => {});
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
   // Escape closes the pin while it's focused, so a pin whose controls are out of
   // reach (mouse away from its corner) still has a keyboard way out
   onMount(() => {
@@ -81,7 +116,12 @@ export function PinView(props: { label: string }) {
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
-      <div data-tauri-drag-region class="pin-drag-region" style={{ opacity: opacity() }}>
+      <div
+        {...(manualDrag() ? {} : { "data-tauri-drag-region": true })}
+        onPointerDown={manualDrag() ? startManualDrag : undefined}
+        class="pin-drag-region"
+        style={{ opacity: opacity() }}
+      >
         {imagePath() ? (
           <img
             src={convertFileSrc(imagePath()!)}

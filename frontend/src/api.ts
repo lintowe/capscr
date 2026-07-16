@@ -277,6 +277,9 @@ export const api = {
   hotkeyDiagnostics: () => invoke<HotkeyDiagnostics>("hotkey_diagnostics"),
   evdevStatus: () => invoke<EvdevStatus>("evdev_status"),
   portalRebindShortcuts: () => invoke<void>("portal_rebind_shortcuts"),
+  pinManualDrag: () => invoke<boolean>("pin_manual_drag"),
+  pinSetPosition: (label: string, x: number, y: number) =>
+    invoke<void>("pin_set_position", { label, x, y }),
   setHotkeysDisabled: (disabled: boolean) =>
     invoke<void>("set_hotkeys_disabled", { disabled }),
   startHotkeyCapture: () => invoke<void>("start_hotkey_capture"),

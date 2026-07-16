@@ -540,6 +540,74 @@ pub mod linux_impl {
     const BAR_W: f64 = 148.0;
     const BAR_H: f64 = 36.0;
 
+    // where the stop-control bar sits relative to the recorded region: just
+    // below its bottom-right corner, above it when there's no room below,
+    // last resort tucked inside (it will then appear in the recording, since
+    // linux has no per-window capture exclusion). region-relative and
+    // compositor-agnostic — only how the position is applied differs by
+    // compositor. returns global logical coordinates.
+    pub(crate) fn bar_position(
+        region: Rectangle,
+        monitors: &[crate::capture::MonitorInfo],
+    ) -> (i32, i32) {
+        let max_y = monitors
+            .iter()
+            .map(|m| m.y + m.height as i32)
+            .max()
+            .unwrap_or(region.y + region.height as i32);
+        let x = (region.x + region.width as i32 - BAR_W as i32).max(region.x);
+        let below = region.y + region.height as i32 + 8;
+        let y = if below + BAR_H as i32 <= max_y {
+            below
+        } else if region.y - BAR_H as i32 - 8 >= 0 {
+            region.y - BAR_H as i32 - 8
+        } else {
+            region.y + region.height as i32 - BAR_H as i32 - 8
+        };
+        (x, y)
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::bar_position;
+        use crate::capture::{MonitorInfo, Rectangle};
+
+        fn mon(x: i32, y: i32, w: u32, h: u32) -> MonitorInfo {
+            MonitorInfo {
+                id: 0,
+                name: "m".into(),
+                x,
+                y,
+                width: w,
+                height: h,
+                is_primary: true,
+            }
+        }
+
+        #[test]
+        fn sits_below_when_there_is_room() {
+            let region = Rectangle { x: 100, y: 100, width: 400, height: 200 };
+            let (x, y) = bar_position(region, &[mon(0, 0, 1920, 1080)]);
+            assert_eq!(y, 308); // 100 + 200 + 8
+            assert_eq!(x, 352); // right edge 500 - 148
+        }
+
+        #[test]
+        fn flips_above_when_no_room_below() {
+            // region hugs the monitor's bottom edge
+            let region = Rectangle { x: 100, y: 800, width: 400, height: 280 };
+            let (_, y) = bar_position(region, &[mon(0, 0, 1920, 1080)]);
+            assert_eq!(y, 756); // 800 - 36 - 8
+        }
+
+        #[test]
+        fn tucks_inside_full_height_region() {
+            let region = Rectangle { x: 0, y: 0, width: 400, height: 1080 };
+            let (_, y) = bar_position(region, &[mon(0, 0, 1920, 1080)]);
+            assert_eq!(y, 1036); // inside: bottom - 36 - 8
+        }
+    }
+
     static ON_STOP: Mutex<Option<Box<dyn Fn() + Send>>> = Mutex::new(None);
     // holds the recbar's plasma-shell role objects for the recording's
     // lifetime; dropped (and destroyed) on stop so nothing leaks per run
@@ -551,23 +619,9 @@ pub mod linux_impl {
         };
         *ON_STOP.lock().unwrap() = Some(on_stop);
 
-        // below the region's bottom-right corner; above it when there's no
-        // room; last resort tucks it inside (it will appear in the recording)
         let monitors = crate::capture::list_monitors().unwrap_or_default();
-        let max_y = monitors
-            .iter()
-            .map(|m| m.y + m.height as i32)
-            .max()
-            .unwrap_or(region.y + region.height as i32);
-        let x = (region.x + region.width as i32 - BAR_W as i32).max(region.x) as f64;
-        let below = region.y + region.height as i32 + 8;
-        let y = if below + BAR_H as i32 <= max_y {
-            below as f64
-        } else if region.y - BAR_H as i32 - 8 >= 0 {
-            (region.y - BAR_H as i32 - 8) as f64
-        } else {
-            (region.y + region.height as i32 - BAR_H as i32 - 8) as f64
-        };
+        let (bar_x, bar_y) = bar_position(region, &monitors);
+        let (x, y) = (bar_x as f64, bar_y as f64);
 
         let app2 = app.clone();
         let _ = app.run_on_main_thread(move || {
@@ -618,11 +672,14 @@ pub mod linux_impl {
                             Some(&geometry),
                             gtk::gdk::WindowHints::MIN_SIZE | gtk::gdk::WindowHints::MAX_SIZE,
                         );
-                        // wayland ignores position(); kde's plasma-shell role
-                        // places the bar at the region corner and keeps it
-                        // above the (possibly fullscreen) recorded app. the
-                        // role must land before first map, hence
-                        // visible(false) above.
+                        // wayland ignores position(); place and keep-above
+                        // the bar via a compositor role. kde's plasma-shell
+                        // role goes first (it also stacks above fullscreen
+                        // windows); wlroots compositors use layer-shell on the
+                        // overlay layer, which is above regular and fullscreen
+                        // surfaces. either role must land before first map,
+                        // hence visible(false) above. gnome gets neither and
+                        // keeps the plain always_on_top window.
                         if crate::capture::gui_is_wayland() {
                             match crate::overlay::plasma_ffi::pin_gtk_window(
                                 gtk_window.upcast_ref(),
@@ -631,7 +688,30 @@ pub mod linux_impl {
                             ) {
                                 Ok(grant) => *PLASMA_GRANT.lock().unwrap() = Some(grant),
                                 Err(e) => {
-                                    tracing::warn!("recbar plasma pinning unavailable: {e:#}")
+                                    tracing::debug!(
+                                        "recbar plasma pinning unavailable ({e:#}); trying layer-shell"
+                                    );
+                                    let gtk_win: &gtk::Window = gtk_window.upcast_ref();
+                                    let pinned = crate::shell::layer_shell::monitor_at(
+                                        gtk_win, x as i32, y as i32,
+                                    )
+                                    .map(|monitor| {
+                                        crate::shell::layer_shell::pin_at(
+                                            gtk_win,
+                                            &monitor,
+                                            crate::shell::layer_shell::LAYER_OVERLAY,
+                                            x as i32,
+                                            y as i32,
+                                            false,
+                                        )
+                                    })
+                                    .unwrap_or(false);
+                                    if !pinned {
+                                        tracing::warn!(
+                                            "recbar keep-above unavailable on this compositor; \
+                                             the bar may sit behind a fullscreen window"
+                                        );
+                                    }
                                 }
                             }
                         }

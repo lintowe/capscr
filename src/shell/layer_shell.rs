@@ -12,12 +12,23 @@
 use std::ffi::{c_char, c_int, c_void, CString};
 use std::sync::OnceLock;
 
+// gtk-layer-shell edge / layer / keyboard-mode constants
+const EDGE_LEFT: c_int = 0;
+const EDGE_RIGHT: c_int = 1;
+const EDGE_TOP: c_int = 2;
+const EDGE_BOTTOM: c_int = 3;
+pub const LAYER_TOP: c_int = 2;
+pub const LAYER_OVERLAY: c_int = 3;
+const KEYBOARD_NONE: c_int = 0;
+const KEYBOARD_ON_DEMAND: c_int = 2;
+
 struct LayerShellApi {
     _library: usize,
     is_supported: unsafe extern "C" fn() -> c_int,
     init_for_window: unsafe extern "C" fn(*mut gtk::ffi::GtkWindow),
     set_layer: unsafe extern "C" fn(*mut gtk::ffi::GtkWindow, c_int),
     set_anchor: unsafe extern "C" fn(*mut gtk::ffi::GtkWindow, c_int, c_int),
+    set_margin: unsafe extern "C" fn(*mut gtk::ffi::GtkWindow, c_int, c_int),
     set_monitor: unsafe extern "C" fn(*mut gtk::ffi::GtkWindow, *mut gtk::gdk::ffi::GdkMonitor),
     set_keyboard_mode: unsafe extern "C" fn(*mut gtk::ffi::GtkWindow, c_int),
     set_namespace: unsafe extern "C" fn(*mut gtk::ffi::GtkWindow, *const c_char),
@@ -66,6 +77,10 @@ fn layer_shell_api() -> Option<&'static LayerShellApi> {
                     "gtk_layer_set_anchor",
                     unsafe extern "C" fn(*mut gtk::ffi::GtkWindow, c_int, c_int)
                 ),
+                set_margin: symbol!(
+                    "gtk_layer_set_margin",
+                    unsafe extern "C" fn(*mut gtk::ffi::GtkWindow, c_int, c_int)
+                ),
                 set_monitor: symbol!(
                     "gtk_layer_set_monitor",
                     unsafe extern "C" fn(*mut gtk::ffi::GtkWindow, *mut gtk::gdk::ffi::GdkMonitor)
@@ -87,6 +102,85 @@ pub fn available() -> bool {
     layer_shell_api()
         .map(|api| unsafe { (api.is_supported)() } != 0)
         .unwrap_or(false)
+}
+
+// pin a fixed-size window to a global logical position on wlroots
+// compositors, the layer-shell counterpart of kde's plasma-shell placement.
+// the surface anchors top-left of its output and is offset by margins into
+// the target position; the window keeps its own size via geometry hints.
+// `keyboard` grants on-demand focus (pins accept clicks), off for the
+// recbar. returns false when layer-shell isn't available so the caller can
+// fall back to a plain window.
+pub fn pin_at(
+    window: &gtk::Window,
+    monitor: &gtk::gdk::Monitor,
+    layer: c_int,
+    global_x: i32,
+    global_y: i32,
+    keyboard: bool,
+) -> bool {
+    use gtk::gdk::prelude::MonitorExt;
+    use gtk::glib::translate::ToGlibPtr;
+    use gtk::prelude::WidgetExt;
+
+    let Some(api) = layer_shell_api() else {
+        return false;
+    };
+    if unsafe { (api.is_supported)() } == 0 {
+        return false;
+    }
+    // margins are output-local, so subtract the monitor's origin
+    let geometry = monitor.geometry();
+    let left = (global_x - geometry.x()).max(0);
+    let top = (global_y - geometry.y()).max(0);
+    if window.is_realized() {
+        window.unrealize();
+    }
+    let namespace = CString::new("capscr-pin").unwrap_or_default();
+    unsafe {
+        let window_ptr = window.to_glib_none().0;
+        (api.init_for_window)(window_ptr);
+        (api.set_namespace)(window_ptr, namespace.as_ptr());
+        (api.set_layer)(window_ptr, layer);
+        (api.set_monitor)(window_ptr, monitor.to_glib_none().0);
+        // anchor to the top-left corner only, so the surface keeps its size
+        // and the margins position it
+        (api.set_anchor)(window_ptr, EDGE_TOP, 1);
+        (api.set_anchor)(window_ptr, EDGE_LEFT, 1);
+        (api.set_anchor)(window_ptr, EDGE_RIGHT, 0);
+        (api.set_anchor)(window_ptr, EDGE_BOTTOM, 0);
+        (api.set_margin)(window_ptr, EDGE_LEFT, left);
+        (api.set_margin)(window_ptr, EDGE_TOP, top);
+        (api.set_keyboard_mode)(
+            window_ptr,
+            if keyboard { KEYBOARD_ON_DEMAND } else { KEYBOARD_NONE },
+        );
+    }
+    true
+}
+
+// the gdk monitor whose geometry contains a global logical point, for
+// handing pin_at the right output
+pub fn monitor_at(window: &gtk::Window, x: i32, y: i32) -> Option<gtk::gdk::Monitor> {
+    use gtk::gdk::prelude::MonitorExt;
+    use gtk::prelude::WidgetExt;
+    let display = window.display();
+    let mut fallback = None;
+    for index in 0..display.n_monitors() {
+        let Some(monitor) = display.monitor(index) else {
+            continue;
+        };
+        let geometry = monitor.geometry();
+        if x >= geometry.x()
+            && x < geometry.x() + geometry.width()
+            && y >= geometry.y()
+            && y < geometry.y() + geometry.height()
+        {
+            return Some(monitor);
+        }
+        fallback.get_or_insert(monitor);
+    }
+    fallback
 }
 
 // full-output surface on the overlay layer with on-demand keyboard focus:

@@ -3881,31 +3881,123 @@ pub async fn pin_image(
     }
 
     let window = builder.build().map_err(|e| e.to_string())?;
-    watch_pin_navigation(&app, window);
+    watch_pin_navigation(&app, window.clone());
 
-    // always_on_top is a no-op on wayland; flag the pin keep-above through
-    // kwin once its window maps (the frontend shows it asynchronously)
+    // always_on_top is a no-op on wayland; keep the pin above other windows
+    // via a compositor role. kde uses kwin scripting (keeps the pin a normal
+    // draggable toplevel); wlroots compositors use layer-shell, which has no
+    // compositor-driven move, so those pins drag through pin_set_position.
     #[cfg(target_os = "linux")]
     if crate::capture::gui_is_wayland() {
-        std::thread::spawn(|| {
-            for _ in 0..10 {
-                std::thread::sleep(Duration::from_millis(300));
-                match crate::capture::keep_own_windows_above("capscr — pinned") {
-                    Ok(count) if count > 0 => {
-                        tracing::debug!("flagged {count} pinned window(s) keep-above");
-                        return;
-                    }
-                    Ok(_) => continue,
-                    Err(e) => {
-                        tracing::debug!("keep-above unavailable: {e:#}");
-                        return;
+        if crate::shell::wayland_globals().plasma_shell {
+            std::thread::spawn(|| {
+                for _ in 0..10 {
+                    std::thread::sleep(Duration::from_millis(300));
+                    match crate::capture::keep_own_windows_above("capscr — pinned") {
+                        Ok(count) if count > 0 => {
+                            tracing::debug!("flagged {count} pinned window(s) keep-above");
+                            return;
+                        }
+                        Ok(_) => continue,
+                        Err(e) => {
+                            tracing::debug!("keep-above unavailable: {e:#}");
+                            return;
+                        }
                     }
                 }
-            }
-            tracing::warn!("pin window never appeared in the window list");
-        });
+                tracing::warn!("pin window never appeared in the window list");
+            });
+        } else {
+            // cascade each new pin down-right from a base offset so stacked
+            // pins don't land exactly on top of one another
+            let index = state.pinned_images.lock().unwrap().len().saturating_sub(1);
+            let base = 48 + (index as i32 % 6) * 36;
+            let app2 = app.clone();
+            let label2 = label.clone();
+            let _ = app.run_on_main_thread(move || {
+                use gtk::prelude::Cast;
+                let Some(win) = app2.get_webview_window(&label2) else {
+                    return;
+                };
+                if let Ok(gtk_window) = win.gtk_window() {
+                    let gtk_win: &gtk::Window = gtk_window.upcast_ref();
+                    let pinned = crate::shell::layer_shell::monitor_at(gtk_win, base, base)
+                        .map(|monitor| {
+                            crate::shell::layer_shell::pin_at(
+                                gtk_win,
+                                &monitor,
+                                crate::shell::layer_shell::LAYER_TOP,
+                                base,
+                                base,
+                                true,
+                            )
+                        })
+                        .unwrap_or(false);
+                    if pinned {
+                        PIN_MANUAL_DRAG.store(true, std::sync::atomic::Ordering::Relaxed);
+                    } else {
+                        tracing::warn!("pin keep-above unavailable on this compositor");
+                    }
+                }
+            });
+        }
     }
     Ok(())
+}
+
+// true once any pin is placed via layer-shell, where the compositor won't
+// move the surface and PinView must drive dragging through pin_set_position
+#[cfg(target_os = "linux")]
+static PIN_MANUAL_DRAG: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+// whether pins need capscr-driven dragging (layer-shell path). the frontend
+// switches its drag region to pointer-delta + pin_set_position when true
+#[tauri::command]
+pub fn pin_manual_drag() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        PIN_MANUAL_DRAG.load(std::sync::atomic::Ordering::Relaxed)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        false
+    }
+}
+
+// move a layer-shell pin by updating its margins (no compositor move exists
+// for layer surfaces). x/y are global logical coordinates.
+#[tauri::command]
+pub fn pin_set_position(label: String, x: i32, y: i32, app: AppHandle) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        let app2 = app.clone();
+        let _ = app.run_on_main_thread(move || {
+            use gtk::prelude::Cast;
+            let Some(win) = app2.get_webview_window(&label) else {
+                return;
+            };
+            if let Ok(gtk_window) = win.gtk_window() {
+                let gtk_win: &gtk::Window = gtk_window.upcast_ref();
+                if let Some(monitor) = crate::shell::layer_shell::monitor_at(gtk_win, x, y) {
+                    crate::shell::layer_shell::pin_at(
+                        gtk_win,
+                        &monitor,
+                        crate::shell::layer_shell::LAYER_TOP,
+                        x,
+                        y,
+                        true,
+                    );
+                }
+            }
+        });
+        Ok(())
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (label, x, y, app);
+        Err("pin_set_position only applies on Linux Wayland".into())
+    }
 }
 
 fn watch_pin_navigation(app: &AppHandle, window: tauri::WebviewWindow) {
