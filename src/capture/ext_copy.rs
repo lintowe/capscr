@@ -69,20 +69,39 @@ struct State {
 }
 
 struct ShmBuffer {
-    file: File,
+    // kept alive for the mapping's lifetime; the compositor writes into the
+    // shared pages and the client reads them through `map`
+    _file: File,
     pool: wl_shm_pool::WlShmPool,
     buffer: wl_buffer::WlBuffer,
+    map: *mut libc::c_void,
     width: u32,
     height: u32,
-    stride: u32,
     format: wl_shm::Format,
     pool_size: usize,
+}
+
+// the mmap pointer is owned solely by this ShmBuffer and only read while the
+// owning ExtCopySession is locked (the still chain holds it behind a Mutex),
+// so moving the buffer between threads is sound even though the raw pointer
+// isn't Send by default
+unsafe impl Send for ShmBuffer {}
+
+impl ShmBuffer {
+    // the compositor's most recent frame, read straight from the shared
+    // mapping — no per-frame read syscall or intermediate allocation
+    fn pixels(&self) -> &[u8] {
+        unsafe { std::slice::from_raw_parts(self.map as *const u8, self.pool_size) }
+    }
 }
 
 impl Drop for ShmBuffer {
     fn drop(&mut self) {
         self.buffer.destroy();
         self.pool.destroy();
+        unsafe {
+            libc::munmap(self.map, self.pool_size);
+        }
     }
 }
 
@@ -365,6 +384,22 @@ impl ExtCopySession {
         }
         let file = unsafe { File::from_raw_fd(fd) };
         file.set_len(size as u64)?;
+        // map the pool once; the compositor writes each frame into these
+        // shared pages, so reads come straight from the mapping instead of a
+        // per-frame pread into a fresh buffer
+        let map = unsafe {
+            libc::mmap(
+                std::ptr::null_mut(),
+                size,
+                libc::PROT_READ,
+                libc::MAP_SHARED,
+                fd,
+                0,
+            )
+        };
+        if map == libc::MAP_FAILED {
+            return Err(std::io::Error::last_os_error().into());
+        }
         let qh = self.queue.handle();
         let pool = self
             .shm
@@ -379,12 +414,12 @@ impl ExtCopySession {
             (),
         );
         Ok(ShmBuffer {
-            file,
+            _file: file,
             pool,
             buffer,
+            map,
             width,
             height,
-            stride,
             format,
             pool_size: size,
         })
@@ -470,24 +505,22 @@ fn pick_format(offered: &[wl_shm::Format]) -> Option<wl_shm::Format> {
 }
 
 fn read_buffer(buffer: &ShmBuffer) -> Result<RgbaImage> {
-    use std::os::unix::fs::FileExt;
-    let mut raw = vec![0u8; buffer.pool_size];
-    buffer.file.read_exact_at(&mut raw, 0)?;
+    let raw = buffer.pixels();
     let mut rgba = vec![0u8; buffer.width as usize * buffer.height as usize * 4];
     // buffers are allocated with stride == width * 4, so the raw bytes are
     // already densely packed and convert in one pass
     match buffer.format {
         wl_shm::Format::Argb8888 => {
-            super::par_convert(&raw, &mut rgba, |s| [s[2], s[1], s[0], s[3]])
+            super::par_convert(raw, &mut rgba, |s| [s[2], s[1], s[0], s[3]])
         }
         wl_shm::Format::Xrgb8888 => {
-            super::par_convert(&raw, &mut rgba, |s| [s[2], s[1], s[0], 255])
+            super::par_convert(raw, &mut rgba, |s| [s[2], s[1], s[0], 255])
         }
         wl_shm::Format::Abgr8888 => {
-            super::par_convert(&raw, &mut rgba, |s| [s[0], s[1], s[2], s[3]])
+            super::par_convert(raw, &mut rgba, |s| [s[0], s[1], s[2], s[3]])
         }
         wl_shm::Format::Xbgr8888 => {
-            super::par_convert(&raw, &mut rgba, |s| [s[0], s[1], s[2], 255])
+            super::par_convert(raw, &mut rgba, |s| [s[0], s[1], s[2], 255])
         }
         other => bail!("unhandled shm format {other:?}"),
     }
