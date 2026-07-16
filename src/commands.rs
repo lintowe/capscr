@@ -660,6 +660,8 @@ fn run_capture_pipeline_inner(
         }
         #[cfg(not(target_os = "linux"))]
         SelectionResult::WaylandWindow { .. } => return Ok(()),
+        // output_name only steers the linux wayland path
+        #[cfg_attr(not(target_os = "linux"), allow(unused_variables))]
         SelectionResult::Monitor { rect, output_name } => {
             #[cfg(target_os = "linux")]
             let image = if crate::capture::is_wayland_session() {
